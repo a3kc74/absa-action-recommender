@@ -1,1 +1,398 @@
+Food Quality:
+  bland_or_no_flavor:
+    label_vi: "Món nhạt hoặc thiếu hương vị chính"
+    aspect_expression_patterns:
+      - "phở"
+      - "phở bò"
+      - "nước dùng"
+      - "sinh tố"
+      - "matcha"
+    opinion_expression_patterns:
+      - "không đậm đà"
+      - "không hề đậm đà"
+      - "không có vị"
+      - "nhạt"
+      - "quá ít"
+      - "chỉ toàn nước"
+    priority: 90
 
+  dry_or_unremarkable_food:
+    label_vi: "Món khô hoặc không có điểm nổi bật"
+    aspect_expression_patterns:
+      - "tôm"
+      - "thịt"
+      - "món"
+    opinion_expression_patterns:
+      - "khô"
+      - "chẳng có gì đặc biệt"
+      - "không đặc biệt"
+      - "bình thường"
+    priority: 80
+
+  inconsistent_food_quality:
+    label_vi: "Chất lượng món không ổn định"
+    opinion_expression_patterns:
+      - "lúc ngon lúc dở"
+      - "không ổn định"
+      - "lần này tệ hơn"
+      - "khác lần trước"
+    priority: 75
+
+  poor_drink_quality:
+    label_vi: "Chất lượng đồ uống chưa tốt"
+    aspect_expression_patterns:
+      - "cocktail"
+      - "sinh tố"
+      - "nước"
+      - "trà"
+      - "cà phê"
+    opinion_expression_patterns:
+      - "nhạt"
+      - "quá ngọt"
+      - "quá ít"
+      - "không có vị"
+    priority: 70
+
+Food Safety:
+  suspected_food_poisoning_or_sickness:
+    label_vi: "Khách nghi bị ảnh hưởng sức khỏe sau khi ăn"
+    opinion_expression_patterns:
+      - "bị ốm"
+      - "ốm nặng"
+      - "đau bụng"
+      - "ngộ độc"
+      - "tiêu chảy"
+      - "buồn nôn"
+    priority: 100
+
+  spoiled_or_unsafe_food:
+    label_vi: "Món có dấu hiệu không an toàn"
+    opinion_expression_patterns:
+      - "ôi thiu"
+      - "mùi lạ"
+      - "chua"
+      - "mốc"
+      - "không tươi"
+      - "có mùi"
+    priority: 95
+
+  unsafe_hygiene_risk:
+    label_vi: "Rủi ro vệ sinh ảnh hưởng an toàn thực phẩm"
+    opinion_expression_patterns:
+      - "nấm mốc"
+      - "bẩn"
+      - "ruồi"
+      - "côn trùng"
+      - "tóc trong đồ ăn"
+    priority: 90
+
+Service:
+  slow_ordering_or_no_attention:
+    label_vi: "Khách phải chờ hoặc tự gọi phục vụ nhiều lần"
+    opinion_expression_patterns:
+      - "phải đi đến quầy"
+      - "gọi món vài lần"
+      - "không ai phục vụ"
+      - "chờ gọi món"
+      - "đợi nhân viên"
+    priority: 90
+
+  slow_food_or_drink_preparation:
+    label_vi: "Chuẩn bị món hoặc đồ uống quá lâu"
+    aspect_expression_patterns:
+      - "cocktail"
+      - "đồ uống"
+      - "món"
+      - "order"
+    opinion_expression_patterns:
+      - "mất đến nửa tiếng"
+      - "lâu mới có"
+      - "mãi mới có"
+      - "chờ món"
+      - "chờ đồ uống"
+    priority: 85
+
+  inconsistent_service_response:
+    label_vi: "Nhân viên trả lời hoặc xử lý không nhất quán"
+    aspect_expression_patterns:
+      - "người phục vụ"
+      - "nhân viên"
+      - "phục vụ"
+    opinion_expression_patterns:
+      - "đổi ý"
+      - "nói khác"
+      - "trả lời là"
+      - "lúc đầu"
+      - "sau đó lại"
+    priority: 85
+
+  rude_or_unhelpful_staff:
+    label_vi: "Thái độ nhân viên không tốt"
+    aspect_expression_patterns:
+      - "nhân viên"
+      - "người phục vụ"
+      - "phục vụ"
+    opinion_expression_patterns:
+      - "thái độ"
+      - "khó chịu"
+      - "tệ hại"
+      - "không hỗ trợ"
+      - "cộc"
+      - "vô lễ"
+    priority: 80
+
+Price:
+  overpriced:
+    label_vi: "Giá bị cảm nhận là cao"
+    opinion_expression_patterns:
+      - "đắt"
+      - "đắt đỏ"
+      - "giá cao"
+      - "không đáng"
+      - "chát"
+    priority: 90
+
+  poor_value_for_money:
+    label_vi: "Giá trị nhận được không tương xứng với giá"
+    opinion_expression_patterns:
+      - "không xứng đáng"
+      - "không đáng tiền"
+      - "ít so với giá"
+      - "khẩu phần ít"
+      - "giá không hợp lý"
+    priority: 85
+
+  unclear_or_hidden_charge:
+    label_vi: "Giá hoặc phụ phí chưa rõ ràng"
+    opinion_expression_patterns:
+      - "không ghi giá"
+      - "phụ thu"
+      - "tính thêm"
+      - "không báo trước"
+      - "menu không rõ giá"
+    priority: 80
+
+Cleanliness:
+  dirty_tableware:
+    label_vi: "Dụng cụ ăn uống bẩn"
+    aspect_expression_patterns:
+      - "bát"
+      - "đĩa"
+      - "bát đĩa"
+      - "ly"
+      - "cốc"
+      - "thìa"
+      - "muỗng"
+      - "đũa"
+    opinion_expression_patterns:
+      - "bẩn"
+      - "chưa được rửa"
+      - "vết bẩn"
+      - "nấm mốc"
+      - "dơ"
+    priority: 100
+
+  dirty_dining_area_surface:
+    label_vi: "Bàn ghế hoặc khu vực ăn uống bẩn"
+    aspect_expression_patterns:
+      - "bàn"
+      - "ghế"
+      - "bàn ghế"
+      - "lan can"
+      - "kính"
+      - "sàn"
+    opinion_expression_patterns:
+      - "bẩn"
+      - "bụi"
+      - "vết bẩn"
+      - "dơ"
+      - "dính"
+    priority: 90
+
+  dirty_restroom:
+    label_vi: "Nhà vệ sinh bẩn"
+    aspect_expression_patterns:
+      - "nhà vệ sinh"
+      - "toilet"
+      - "wc"
+    opinion_expression_patterns:
+      - "bẩn"
+      - "hôi"
+      - "dơ"
+      - "không sạch"
+    priority: 85
+
+  facility_comfort_issue:
+    label_vi: "Cơ sở vật chất gây khó chịu"
+    aspect_expression_patterns:
+      - "cửa"
+      - "máy lạnh"
+      - "quạt"
+    opinion_expression_patterns:
+      - "mở toang"
+      - "lạnh kinh khủng"
+      - "nóng"
+      - "bí"
+    priority: 70
+
+Ambience:
+  noisy_or_crowded:
+    label_vi: "Không gian ồn hoặc chật"
+    opinion_expression_patterns:
+      - "ồn"
+      - "chật"
+      - "đông"
+      - "chen chúc"
+      - "khó nói chuyện"
+    priority: 85
+
+  uncomfortable_temperature_or_lighting:
+    label_vi: "Nhiệt độ hoặc ánh sáng gây khó chịu"
+    opinion_expression_patterns:
+      - "nóng"
+      - "lạnh"
+      - "tối"
+      - "chói"
+      - "bí"
+    priority: 75
+
+  poor_decoration_or_layout:
+    label_vi: "Trang trí hoặc bố trí không tốt"
+    opinion_expression_patterns:
+      - "xấu"
+      - "cũ"
+      - "bừa"
+      - "không đẹp"
+      - "bố trí kém"
+    priority: 70
+
+Location:
+  hard_to_find:
+    label_vi: "Quán khó tìm"
+    aspect_expression_patterns:
+      - "quán"
+      - "địa chỉ"
+      - "đường vào"
+      - "bảng hiệu"
+    opinion_expression_patterns:
+      - "khó tìm"
+      - "không dễ tìm"
+      - "đường vào khó"
+      - "đi lòng vòng"
+      - "google maps sai"
+    priority: 85
+
+  inconvenient_access:
+    label_vi: "Đường đi hoặc vị trí bất tiện"
+    opinion_expression_patterns:
+      - "xa"
+      - "bất tiện"
+      - "khó đi"
+      - "đường nhỏ"
+      - "kẹt xe"
+    priority: 75
+
+  parking_issue:
+    label_vi: "Chỗ gửi xe bất tiện"
+    aspect_expression_patterns:
+      - "gửi xe"
+      - "đỗ xe"
+      - "bãi xe"
+      - "parking"
+      - "chỗ gửi xe"
+    opinion_expression_patterns:
+      - "không có chỗ"
+      - "khó gửi xe"
+      - "gửi xe xa"
+      - "phí gửi xe"
+      - "bất tiện"
+    priority: 90
+
+  bad_surrounding_area:
+    label_vi: "Khu vực xung quanh không tốt"
+    opinion_expression_patterns:
+      - "khu vực xung quanh"
+      - "hẻm"
+      - "tối"
+      - "khó chịu"
+      - "không an toàn"
+    priority: 65
+
+  good_view_but_issue:
+    label_vi: "View tốt nhưng trải nghiệm bị ảnh hưởng"
+    aspect_expression_patterns:
+      - "view"
+      - "tầm nhìn"
+      - "cảnh"
+    opinion_expression_patterns:
+      - "view đẹp nhưng"
+      - "tầm nhìn đẹp nhưng"
+      - "cảnh đẹp nhưng"
+    priority: 60
+
+Menu:
+  menu_item_unavailable:
+    label_vi: "Món trên menu bị hết hoặc không có"
+    aspect_expression_patterns:
+      - "menu"
+      - "món"
+      - "món trên menu"
+    opinion_expression_patterns:
+      - "hết món"
+      - "không có món"
+      - "menu có nhưng"
+      - "ghi trong menu nhưng"
+      - "không bán"
+    priority: 90
+
+  unclear_menu_information:
+    label_vi: "Thông tin trên menu chưa rõ"
+    aspect_expression_patterns:
+      - "menu"
+      - "combo"
+      - "set"
+    opinion_expression_patterns:
+      - "menu khó hiểu"
+      - "không rõ"
+      - "không ghi rõ"
+      - "mô tả khó hiểu"
+      - "không biết chọn"
+    priority: 80
+
+  limited_menu_variety:
+    label_vi: "Menu ít lựa chọn"
+    aspect_expression_patterns:
+      - "menu"
+    opinion_expression_patterns:
+      - "ít món"
+      - "ít lựa chọn"
+      - "không đa dạng"
+      - "menu nghèo nàn"
+      - "ít món chay"
+    priority: 75
+
+  menu_photo_mismatch:
+    label_vi: "Ảnh hoặc mô tả menu không khớp thực tế"
+    aspect_expression_patterns:
+      - "ảnh"
+      - "ảnh trên menu"
+      - "menu"
+    opinion_expression_patterns:
+      - "không giống hình"
+      - "khác ảnh"
+      - "ảnh đẹp hơn"
+      - "không như mô tả"
+      - "không đúng như menu"
+    priority: 85
+
+  missing_price_on_menu:
+    label_vi: "Menu thiếu giá hoặc giá không rõ"
+    aspect_expression_patterns:
+      - "menu"
+      - "giá"
+    opinion_expression_patterns:
+      - "không ghi giá"
+      - "giá không rõ"
+      - "menu không có giá"
+      - "không biết giá"
+    priority: 70

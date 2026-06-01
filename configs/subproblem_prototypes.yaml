@@ -1,0 +1,43 @@
+Food Quality:
+  bland_or_no_flavor:
+    examples:
+      - aspect_expression: "phở bò"
+        opinion_expression: "không hề đậm đà không có vị thịt chỉ toàn nước muối"
+      - aspect_expression: "nước dùng"
+        opinion_expression: "loãng không có vị bò"
+      - aspect_expression: "sinh tố matcha"
+        opinion_expression: "quá ít matcha nên không có vị matcha"
+
+Cleanliness:
+  dirty_tableware:
+    examples:
+      - aspect_expression: "bát đĩa"
+        opinion_expression: "chưa được rửa và rất bẩn"
+      - aspect_expression: "thìa"
+        opinion_expression: "vết bẩn đen đen có lẽ là nấm mốc"
+      - aspect_expression: "ly"
+        opinion_expression: "bẩn"
+
+Service:
+  inconsistent_service_response:
+    examples:
+      - aspect_expression: "người phục vụ"
+        opinion_expression: "đổi ý"
+      - aspect_expression: "nhân viên"
+        opinion_expression: "lúc đầu nói đang nấu sau đó nói đã nấu xong"
+
+Menu:
+  menu_item_unavailable:
+    examples:
+      - aspect_expression: "menu"
+        opinion_expression: "ghi có món nhưng đến nơi lại hết món"
+      - aspect_expression: "món trên menu"
+        opinion_expression: "không bán dù vẫn ghi trong menu"
+
+Location:
+  parking_issue:
+    examples:
+      - aspect_expression: "chỗ gửi xe"
+        opinion_expression: "không có chỗ gửi xe"
+      - aspect_expression: "bãi xe"
+        opinion_expression: "khó gửi xe và phải đi xa"

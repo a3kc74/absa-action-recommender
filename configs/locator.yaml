@@ -1,0 +1,19 @@
+thresholds:
+  auto_assign: 0.70
+  needs_review: 0.45
+  rule_auto_assign: 2.0
+  prototype_auto_assign: 0.55
+  high_risk_auto_assign: 0.75
+
+weights:
+  rule_score: 0.45
+  prototype_similarity: 0.35
+  severity: 0.10
+  model_confidence: 0.10
+
+high_risk_aspects:
+  - Food Safety
+  - Cleanliness
+
+fallback:
+  generic_prefix: generic

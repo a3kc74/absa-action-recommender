@@ -1,1 +1,38 @@
+scoring:
+  weights:
+    negative_rate: 0.25
+    sentiment_severity: 0.18
+    mention_share: 0.12
+    rating_gap: 0.15
+    trend_score: 0.15
+    benchmark_gap: 0.15
 
+  smoothing:
+    alpha: 10
+
+  confidence:
+    support_threshold_tau: 30
+    lambda_support: 0.70
+    default_missing_confidence: 0.75
+
+  risk_multiplier:
+    Food Safety: 1.20
+    Cleanliness: 1.10
+    Food Quality: 1.00
+    Service: 1.00
+    Price: 1.00
+    Ambience: 1.00
+    Location: 0.95
+    Menu: 1.00
+    Unknown: 0.70
+
+  safety_rules:
+    force_food_safety_top3: true
+    food_safety_negative_threshold: 0.10
+
+  defaults:
+    rating_if_missing: 3.5
+    epsilon: 1.0e-9
+    trend_if_missing: 0.0
+    benchmark_if_missing: 0.0
+    risk_multiplier_if_missing: 1.0
