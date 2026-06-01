@@ -78,3 +78,19 @@ class PrototypeMatch(BaseModel):
     sub_problem_id: str | None
     similarity: float = Field(ge=0.0, le=1.0)
     nearest_prototype_examples: list[dict[str, str]]
+
+
+class SubProblemPrediction(BaseModel):
+    review_id: str
+    aspect_category: str
+    aspect_expression: str
+    opinion_expression: str
+    sentiment: str
+    model_confidence: Optional[float]
+    predicted_sub_problem_id: str
+    sub_problem_label: str
+    locator_score: float = Field(ge=0.0, le=1.0)
+    match_type: str
+    needs_review: bool
+    matched_patterns: dict[str, list[str]]
+    nearest_prototypes: list[dict[str, str]]

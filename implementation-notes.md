@@ -65,3 +65,14 @@
 - Matching text follows the requested format exactly: `aspect_expression + " | " + opinion_expression`, normalized with the same `normalize_text` helper used by rule matching.
 - The matcher uses `TfidfVectorizer(analyzer="char_wb", ngram_range=(3, 5))`. Cosine similarity is the sparse dot product because scikit-learn normalizes TF-IDF vectors by default.
 - I added a close `muỗng` prototype and a close `món trên menu không còn bán` prototype so the requested tests are deterministic instead of relying on weak similarity to distant examples.
+
+## 2026-06-01: Sub-problem locator
+
+- Read `AGENTS.md` before coding, as requested.
+- Added `SubProblemPrediction` to `schemas.py`. The output uses `aspect_expression` and `opinion_expression` for user-facing prediction records and does not expose any `evidence` field.
+- `locate_subproblem` combines rule score, prototype similarity, severity, and model confidence using `configs/locator.yaml`.
+- Rule score normalization uses `thresholds.rule_auto_assign`: `normalized_rule_score = min(rule_score / rule_auto_assign, 1.0)`.
+- Prototype similarity is used directly because TF-IDF cosine similarity is already in `[0, 1]`.
+- Missing `model_confidence` is treated as `0.0` in the locator because `locator.yaml` does not define a default. Upstream aggregation/scoring still uses the scoring config default for aggregate confidence.
+- The predicted sub-problem ID is chosen from the stronger of normalized rule score and prototype similarity before threshold decisions. If the final locator score is below `thresholds.needs_review`, the prediction is forced to the generic aspect issue.
+- High-risk aspects listed in `locator.yaml` use `thresholds.high_risk_auto_assign` for automatic assignment; other aspects use `thresholds.auto_assign`.

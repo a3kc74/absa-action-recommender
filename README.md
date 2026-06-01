@@ -192,3 +192,36 @@ aspect_expression + " | " + opinion_expression
 The matcher uses `TfidfVectorizer(analyzer="char_wb", ngram_range=(3, 5))` and only compares prototypes under the same aspect. It returns the nearest `sub_problem_id`, cosine similarity, and nearest prototype examples.
 
 Run `uv run pytest tests/test_prototype_matcher.py` to validate prototype matching directly.
+
+## Sub-Problem Locator
+
+`src/absa_recommender/subproblem_locator.py` combines rule matching and prototype matching into one prediction record.
+
+`locate_subproblem(extraction, rules, prototypes, locator_config)` returns `SubProblemPrediction` with:
+
+- `review_id`
+- `aspect_category`
+- `aspect_expression`
+- `opinion_expression`
+- `sentiment`
+- `model_confidence`
+- `predicted_sub_problem_id`
+- `sub_problem_label`
+- `locator_score`
+- `match_type`
+- `needs_review`
+- `matched_patterns`
+- `nearest_prototypes`
+
+Locator score:
+
+```text
+weights.rule_score * normalized_rule_score
++ weights.prototype_similarity * prototype_similarity
++ weights.severity * severity
++ weights.model_confidence * effective_model_confidence
+```
+
+High-risk aspects from `configs/locator.yaml` use the higher `thresholds.high_risk_auto_assign` threshold for automatic assignment. If the final score is below `thresholds.needs_review`, the prediction falls back to `generic_<aspect_slug>_issue` and requires review.
+
+Run `uv run pytest tests/test_subproblem_locator.py` to validate locator behavior directly.
