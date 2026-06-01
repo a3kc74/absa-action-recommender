@@ -1,0 +1,40 @@
+[project]
+name = "absa-action-recommender"
+version = "0.1.0"
+description = "Local-first Aspect-to-Action Recommender for Vietnamese restaurant ABSA outputs."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "duckdb",
+    "fastapi",
+    "polars",
+    "pydantic",
+    "pyyaml",
+    "scikit-learn",
+    "streamlit",
+    "typer",
+    "uvicorn",
+]
+
+[project.scripts]
+absa-rec = "absa_recommender.cli:app"
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "ruff",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/absa_recommender"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
