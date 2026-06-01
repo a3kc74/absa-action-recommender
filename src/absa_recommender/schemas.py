@@ -94,3 +94,10 @@ class SubProblemPrediction(BaseModel):
     needs_review: bool
     matched_patterns: dict[str, list[str]]
     nearest_prototypes: list[dict[str, str]]
+
+
+class ActionRecommendation(BaseModel):
+    aspect: str
+    sub_problem_id: str
+    actions: list[str]
+    kpis: list[str]

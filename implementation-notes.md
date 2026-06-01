@@ -76,3 +76,11 @@
 - Missing `model_confidence` is treated as `0.0` in the locator because `locator.yaml` does not define a default. Upstream aggregation/scoring still uses the scoring config default for aggregate confidence.
 - The predicted sub-problem ID is chosen from the stronger of normalized rule score and prototype similarity before threshold decisions. If the final locator score is below `thresholds.needs_review`, the prediction is forced to the generic aspect issue.
 - High-risk aspects listed in `locator.yaml` use `thresholds.high_risk_auto_assign` for automatic assignment; other aspects use `thresholds.auto_assign`.
+
+## 2026-06-01: Action catalog mapping
+
+- Read `AGENTS.md` before coding, as requested.
+- Replaced `configs/action_catalog.yaml` with valid UTF-8 Vietnamese action text and added generic fallback entries for all 8 official aspects plus `Unknown`.
+- Added catalog-facing `ActionRecommendation` to `schemas.py`. The older prototype `models.py` still has a separate `ActionRecommendation` used by the early recommender smoke test; I left that untouched to avoid broad unrelated refactoring.
+- `actions.py` lookup only uses `aspect` and `sub_problem_id`. It deliberately does not accept or read `aspect_expression`, `opinion_expression`, or any evidence-like field.
+- Fallback order is exact `aspect + sub_problem_id`, then the generic action under the same aspect, then `Unknown.generic_unknown_issue` when the aspect itself is absent.

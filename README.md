@@ -225,3 +225,29 @@ weights.rule_score * normalized_rule_score
 High-risk aspects from `configs/locator.yaml` use the higher `thresholds.high_risk_auto_assign` threshold for automatic assignment. If the final score is below `thresholds.needs_review`, the prediction falls back to `generic_<aspect_slug>_issue` and requires review.
 
 Run `uv run pytest tests/test_subproblem_locator.py` to validate locator behavior directly.
+
+## Action Catalog
+
+`src/absa_recommender/actions.py` maps located sub-problems to operational actions.
+
+Use:
+
+- `load_action_catalog(path)`
+- `get_actions(aspect, sub_problem_id, catalog)`
+
+The action catalog lookup only uses:
+
+- `aspect`
+- `sub_problem_id`
+
+It must not depend on `aspect_expression`, `opinion_expression`, or any `evidence` field.
+
+Fallback order:
+
+1. Exact `aspect + sub_problem_id`
+2. Generic fallback under the same aspect, such as `generic_menu_issue`
+3. `Unknown.generic_unknown_issue` if the aspect is not found
+
+`configs/action_catalog.yaml` includes generic fallback actions for all 8 official aspects and `Unknown`.
+
+Run `uv run pytest tests/test_actions.py` to validate action lookup directly.

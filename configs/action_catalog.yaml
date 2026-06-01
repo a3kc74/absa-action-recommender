@@ -1,4 +1,9 @@
 Food Quality:
+  generic_food_quality_issue:
+    actions:
+      - "Rà soát chất lượng món, công thức chuẩn và phản hồi gần đây theo ca."
+    kpis:
+      - food_quality_negative_rate_30d
   bland_or_no_flavor:
     actions:
       - "Rà soát định lượng nước dùng, gia vị và nguyên liệu chính trong công thức chuẩn."
@@ -6,200 +11,108 @@ Food Quality:
     kpis:
       - food_quality_negative_rate_30d
       - bland_food_mentions_30d
-  dry_or_unremarkable_food:
-    actions:
-      - "Kiểm tra thời gian chế biến và tiêu chuẩn giữ ẩm của món."
-      - "Đánh giá lại điểm nhấn hương vị hoặc phần trình bày."
-    kpis:
-      - dry_food_mentions_30d
-  inconsistent_food_quality:
-    actions:
-      - "Chuẩn hóa công thức và kiểm tra tuân thủ theo ca."
-      - "So sánh phản hồi theo đầu bếp hoặc khung giờ."
-    kpis:
-      - inconsistent_food_mentions_30d
-  poor_drink_quality:
-    actions:
-      - "Rà soát định lượng đồ uống và cân bằng vị."
-      - "Kiểm tra nguyên liệu pha chế trước ca."
-    kpis:
-      - drink_quality_negative_rate_30d
 
 Food Safety:
+  generic_food_safety_issue:
+    actions:
+      - "Kích hoạt kiểm tra an toàn thực phẩm cho phản hồi liên quan."
+    kpis:
+      - food_safety_negative_rate_30d
   suspected_food_poisoning_or_sickness:
     actions:
       - "Kích hoạt quy trình kiểm tra an toàn thực phẩm và lưu mẫu liên quan."
-      - "Liên hệ khách để ghi nhận thông tin thời gian, món ăn và triệu chứng."
     kpis:
       - food_safety_incidents_30d
-  spoiled_or_unsafe_food:
-    actions:
-      - "Kiểm tra hạn dùng, nhiệt độ bảo quản và lô nguyên liệu."
-      - "Tạm dừng bán món nghi ngờ cho đến khi xác minh xong."
-    kpis:
-      - spoiled_food_mentions_30d
-  unsafe_hygiene_risk:
-    actions:
-      - "Tăng tần suất kiểm tra vệ sinh khu bếp và khu phục vụ."
-      - "Ghi nhận ảnh kiểm tra sau mỗi ca."
-    kpis:
-      - hygiene_risk_mentions_30d
 
 Service:
-  slow_ordering_or_no_attention:
+  generic_service_issue:
     actions:
-      - "Điều chỉnh phân công nhân viên theo khu vực và giờ cao điểm."
-      - "Theo dõi thời gian khách chờ gọi món."
+      - "Rà soát quy trình phục vụ, phân công nhân viên và phản hồi theo ca."
     kpis:
-      - service_wait_mentions_30d
-  slow_food_or_drink_preparation:
-    actions:
-      - "Đo thời gian ra món theo nhóm món và khung giờ."
-      - "Rà soát nút thắt giữa bếp, bar và phục vụ."
-    kpis:
-      - preparation_delay_mentions_30d
+      - service_negative_rate_30d
   inconsistent_service_response:
     actions:
       - "Chuẩn hóa kịch bản phản hồi về trạng thái món và order."
-      - "Đào tạo nhân viên xác nhận thông tin trước khi trả lời khách."
     kpis:
       - inconsistent_service_mentions_30d
-  rude_or_unhelpful_staff:
+  slow_food_or_drink_preparation:
     actions:
-      - "Huấn luyện thái độ phục vụ và quy trình xử lý khiếu nại."
-      - "Theo dõi phản hồi theo ca và nhân sự liên quan."
+      - "Đo thời gian ra món theo nhóm món và khung giờ."
     kpis:
-      - rude_staff_mentions_30d
+      - preparation_delay_mentions_30d
 
 Price:
+  generic_price_issue:
+    actions:
+      - "Rà soát cảm nhận giá trị, khẩu phần và cách hiển thị giá."
+    kpis:
+      - price_negative_rate_30d
   overpriced:
     actions:
       - "Đánh giá lại cảm nhận giá so với khẩu phần và chất lượng."
-      - "Làm rõ giá trị món trong mô tả menu."
     kpis:
       - price_negative_rate_30d
-  poor_value_for_money:
-    actions:
-      - "Kiểm tra khẩu phần thực tế so với tiêu chuẩn."
-      - "So sánh combo hoặc set với mức giá khách kỳ vọng."
-    kpis:
-      - poor_value_mentions_30d
-  unclear_or_hidden_charge:
-    actions:
-      - "Rà soát cách hiển thị phụ phí và điều kiện áp dụng."
-      - "Đảm bảo nhân viên thông báo phụ phí trước khi xác nhận order."
-    kpis:
-      - hidden_charge_mentions_30d
 
 Cleanliness:
+  generic_cleanliness_issue:
+    actions:
+      - "Tăng kiểm tra vệ sinh theo checklist và ghi nhận trách nhiệm từng ca."
+    kpis:
+      - cleanliness_negative_rate_30d
   dirty_tableware:
     actions:
       - "Kiểm tra lại quy trình rửa và soi dụng cụ trước khi phục vụ."
       - "Loại bỏ dụng cụ có vết mốc hoặc vết bẩn khó xử lý."
     kpis:
       - dirty_tableware_mentions_30d
-  dirty_dining_area_surface:
-    actions:
-      - "Tăng checklist vệ sinh bàn ghế và sàn theo khung giờ."
-      - "Giao trách nhiệm kiểm tra cuối ca cho trưởng ca."
-    kpis:
-      - dirty_surface_mentions_30d
-  dirty_restroom:
-    actions:
-      - "Tăng tần suất kiểm tra nhà vệ sinh trong giờ đông khách."
-      - "Bổ sung checklist mùi, giấy, nước rửa tay và sàn."
-    kpis:
-      - dirty_restroom_mentions_30d
-  facility_comfort_issue:
-    actions:
-      - "Kiểm tra nhiệt độ, thông gió và tình trạng cửa/quạt/máy lạnh."
-      - "Ghi nhận sự cố cơ sở vật chất theo ca."
-    kpis:
-      - facility_comfort_mentions_30d
 
 Ambience:
+  generic_ambience_issue:
+    actions:
+      - "Rà soát các yếu tố không gian như tiếng ồn, ánh sáng, nhiệt độ và bố trí."
+    kpis:
+      - ambience_negative_rate_30d
   noisy_or_crowded:
     actions:
       - "Điều chỉnh bố trí bàn và kiểm soát đặt chỗ giờ cao điểm."
-      - "Theo dõi phản hồi về tiếng ồn và mật độ khách."
     kpis:
       - noisy_crowded_mentions_30d
-  uncomfortable_temperature_or_lighting:
-    actions:
-      - "Kiểm tra nhiệt độ, ánh sáng và thông gió trong khu ăn uống."
-      - "Điều chỉnh thiết lập theo thời điểm trong ngày."
-    kpis:
-      - ambience_comfort_mentions_30d
-  poor_decoration_or_layout:
-    actions:
-      - "Rà soát bố trí không gian và các điểm gây khó chịu."
-      - "Ưu tiên sửa các khu vực xuất hiện nhiều phản hồi tiêu cực."
-    kpis:
-      - layout_negative_mentions_30d
 
 Location:
+  generic_location_issue:
+    actions:
+      - "Cập nhật thông tin vị trí, hướng dẫn đường đi và các tiện ích xung quanh."
+    kpis:
+      - location_negative_rate_30d
   hard_to_find:
     actions:
       - "Cập nhật chỉ dẫn đường đi, bảng hiệu và thông tin bản đồ."
-      - "Thêm hướng dẫn tìm quán trên kênh đặt bàn."
     kpis:
       - hard_to_find_mentions_30d
-  inconvenient_access:
-    actions:
-      - "Làm rõ thông tin đường đi và thời điểm dễ kẹt xe."
-      - "Gợi ý tuyến tiếp cận thuận tiện cho khách."
-    kpis:
-      - access_issue_mentions_30d
   parking_issue:
     actions:
       - "Cập nhật thông tin chỗ gửi xe, phí và khoảng cách đi bộ."
       - "Làm việc với điểm gửi xe gần quán nếu cần."
     kpis:
       - parking_issue_mentions_30d
-  bad_surrounding_area:
-    actions:
-      - "Làm rõ chỉ dẫn an toàn và lối vào phù hợp cho khách."
-      - "Theo dõi phản hồi theo khung giờ tối."
-    kpis:
-      - surrounding_area_mentions_30d
-  good_view_but_issue:
-    actions:
-      - "Xác định yếu tố làm giảm trải nghiệm tại khu vực có view."
-      - "Điều chỉnh bố trí hoặc phục vụ quanh khu vực đó."
-    kpis:
-      - view_issue_mentions_30d
 
 Menu:
+  generic_menu_issue:
+    actions:
+      - "Rà soát nội dung menu, tình trạng món, ảnh món và thông tin giá."
+    kpis:
+      - menu_negative_rate_30d
   menu_item_unavailable:
     actions:
       - "Đồng bộ tình trạng hết món giữa bếp, phục vụ và menu."
       - "Ẩn hoặc đánh dấu món hết trên kênh online."
     kpis:
       - unavailable_menu_item_mentions_30d
-  unclear_menu_information:
-    actions:
-      - "Viết lại mô tả món, combo và điều kiện áp dụng rõ hơn."
-      - "Kiểm tra menu với nhân viên mới để phát hiện điểm khó hiểu."
-    kpis:
-      - unclear_menu_mentions_30d
-  limited_menu_variety:
-    actions:
-      - "Đánh giá nhu cầu bổ sung nhóm món hoặc lựa chọn ăn kiêng."
-      - "Theo dõi phản hồi về độ đa dạng theo phân khúc khách."
-    kpis:
-      - limited_menu_mentions_30d
   menu_photo_mismatch:
     actions:
       - "Cập nhật ảnh menu sát với khẩu phần và trình bày thực tế."
-      - "Kiểm tra định kỳ các ảnh đang dùng trên kênh online."
     kpis:
       - menu_photo_mismatch_mentions_30d
-  missing_price_on_menu:
-    actions:
-      - "Bổ sung giá hoặc khoảng giá rõ ràng trên menu."
-      - "Kiểm tra các món có phụ phí hoặc giá theo thời điểm."
-    kpis:
-      - missing_price_mentions_30d
 
 Unknown:
   generic_unknown_issue:
