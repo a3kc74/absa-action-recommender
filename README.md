@@ -117,3 +117,32 @@ It computes:
 - optional `window_start` and `window_end` from min/max non-null `review_time`
 
 Run `uv run pytest tests/test_aggregation.py` to validate aggregation behavior directly, or `uv run pytest` for the full project suite.
+
+## Scoring Engine
+
+`src/absa_recommender/scoring.py` provides the MVP priority score components:
+
+- `compute_global_negative_rate_by_aspect`
+- `smoothed_negative_rate`
+- `log_mention_share`
+- `normalized_rating_gap`
+- `support_confidence`
+- `model_confidence`
+- `combined_confidence`
+- `benchmark_gap`
+- `compute_priority_score`
+
+Formula notes:
+
+- `smoothed_negative_rate = (negative_count + alpha * global_mu) / (mention_count + alpha)`
+- `log_mention_share = log1p(mention_count) / log1p(total_mentions)`
+- `normalized_rating_gap = (5 - avg_rating) / 4`
+- `support_confidence = 1 - exp(-mention_count / tau)`
+- `combined_confidence = lambda_support * support_confidence + (1 - lambda_support) * model_confidence`
+- `benchmark_gap = max(0, neg_rate - peer_avg_neg_rate)`, or `0.0` when peer data is unavailable
+
+For MVP, `trend_score` is expected to be `0.0` when review time is unavailable, and benchmark gap is `0.0` when peer data is unavailable. Risk multipliers come from `configs/scoring.yaml`; missing aspect multipliers fall back to `scoring.defaults.risk_multiplier_if_missing`.
+
+All component functions clamp outputs to `[0, 1]`; final `priority_score` is clamped to `[0, 100]`.
+
+Run `uv run pytest tests/test_scoring.py` to validate scoring directly.

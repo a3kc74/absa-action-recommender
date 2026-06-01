@@ -51,3 +51,14 @@ class AspectStats(BaseModel):
     total_mentions_for_restaurant: int
     window_start: Optional[datetime] = None
     window_end: Optional[datetime] = None
+
+
+class AspectRecommendationCandidate(BaseModel):
+    restaurant_id: str
+    aspect: str
+    priority_score: float = Field(ge=0.0, le=100.0)
+    confidence: float = Field(ge=0.0, le=1.0)
+    severity: float = Field(ge=0.0, le=1.0)
+    mention_count: int
+    negative_count: int
+    component_scores: dict[str, float]

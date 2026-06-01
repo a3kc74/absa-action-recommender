@@ -30,3 +30,17 @@
 - `aggregate_aspect_stats` accepts either the whole loaded `scoring.yaml` structure or its inner `scoring` object. This keeps tests and future callers flexible.
 - Missing ratings and model confidence values are replaced per extraction before averaging, using `scoring.defaults.rating_if_missing` and `scoring.confidence.default_missing_confidence`.
 - `window_start` and `window_end` were not fully specified. I set them to min/max non-null `review_time` within each restaurant/aspect group, and leave them `None` if the group has no review time.
+
+## 2026-06-01: Scoring engine
+
+- Read `AGENTS.md` before coding, as requested.
+- Added `AspectRecommendationCandidate` to `schemas.py` as the Pydantic schema for scored aspect-level candidates.
+- Implemented scoring components as small pure functions in `scoring.py`. Each component clamps its output to `[0, 1]`; `compute_priority_score` clamps the final weighted score before converting it to `[0, 100]`.
+- Formula choices not specified in the prompt:
+  - `log_mention_share = log1p(mention_count) / log1p(total_mentions)`.
+  - `normalized_rating_gap = (5 - avg_rating) / 4`, assuming the configured review rating scale is 1 to 5.
+  - `support_confidence = 1 - exp(-mention_count / tau)`.
+  - `combined_confidence = lambda_support * support_confidence + (1 - lambda_support) * model_confidence`.
+  - `benchmark_gap = max(0, neg_rate - peer_avg_neg_rate)`, and returns `0.0` when peer data is unavailable.
+- `compute_priority_score` only computes the numeric priority score. Candidate assembly is intentionally left to the recommender layer so sub-problem/action mapping can be added later without coupling it to score math.
+- Risk multipliers come from `scoring.risk_multiplier`; missing aspects use `scoring.defaults.risk_multiplier_if_missing`.
