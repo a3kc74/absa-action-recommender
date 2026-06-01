@@ -80,9 +80,40 @@ Strict validation raises `ValueError` for unknown labels. Permissive validation 
 
 - `src/absa_recommender/schemas.py` contains the Pydantic v2 schemas for the actual ABSA format.
 - `src/absa_recommender/normalize_absa.py` loads ABSA JSONL and flattens reviews into one `AspectExtraction` per annotation.
+- `src/absa_recommender/aggregation.py` groups flattened extractions into restaurant/aspect-level `AspectStats`.
 - `AspectExtraction.extraction_id` is deterministic: `f"{review_id}_{annotation_index}"`.
-- `severity` is currently set to `0.0`; severity scoring is intentionally deferred.
+- `severity` is computed from `opinion_expression` using `configs/severity_lexicon.yaml`.
 - Missing `restaurant_id` values are filled with `default_restaurant_id`, which defaults to `unknown`.
 - The `/flatten` API endpoint returns flattened `AspectExtraction` records for one submitted review.
 
 Additional running implementation notes are in `implementation-notes.md`.
+
+## Severity Scoring
+
+`src/absa_recommender/severity.py` provides deterministic rule-based severity scoring:
+
+- Base scores come from `configs/severity_lexicon.yaml`.
+- `positive` -> `0.0`
+- `neutral` -> `0.25`
+- `negative` -> `0.75`
+- Strong negative patterns raise severity to at least `0.9`.
+- Safety patterns, or aspect `Food Safety`, raise severity to at least `0.95`.
+- Mild negative patterns without strong/safety patterns score `0.6`.
+- Final severity is clamped to `[0, 1]`.
+
+`khó hiểu` is not in `mild_negative_patterns` because unclear menu complaints such as `menu khó hiểu` should remain at least default negative severity for the current tests and product interpretation.
+
+## Aggregation
+
+`aggregate_aspect_stats(extractions, scoring_config)` returns one `AspectStats` record per `(restaurant_id, aspect)` group.
+
+It computes:
+
+- mention, negative, positive, and neutral counts
+- average severity
+- average rating, replacing missing ratings with `scoring.defaults.rating_if_missing`
+- average confidence, replacing missing `model_confidence` with `scoring.confidence.default_missing_confidence`
+- total mentions for the restaurant across all aspects
+- optional `window_start` and `window_end` from min/max non-null `review_time`
+
+Run `uv run pytest tests/test_aggregation.py` to validate aggregation behavior directly, or `uv run pytest` for the full project suite.

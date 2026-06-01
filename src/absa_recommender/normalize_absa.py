@@ -5,6 +5,7 @@ from typing import Any
 from absa_recommender.config import normalize_aspect_label, validate_aspect_label
 from absa_recommender.config import normalize_sentiment_label, validate_sentiment_label
 from absa_recommender.schemas import ABSAReview, AspectExtraction
+from absa_recommender.severity import compute_severity, load_severity_config
 
 
 def load_absa_jsonl(path: str | Path) -> list[ABSAReview]:
@@ -21,8 +22,10 @@ def flatten_reviews(
     label_schema: dict[str, Any],
     default_restaurant_id: str = "unknown",
     strict: bool = True,
+    severity_config: dict[str, Any] | None = None,
 ) -> list[AspectExtraction]:
     extractions: list[AspectExtraction] = []
+    severity_rules = severity_config or load_severity_config("configs/severity_lexicon.yaml")
     for review in reviews:
         restaurant_id = review.restaurant_id or default_restaurant_id
         for annotation_index, annotation in enumerate(review.annotations):
@@ -43,7 +46,12 @@ def flatten_reviews(
                     aspect_term=annotation.aspect_expression,
                     opinion_text=annotation.opinion_expression,
                     sentiment=sentiment,
-                    severity=0.0,
+                    severity=compute_severity(
+                        sentiment,
+                        annotation.opinion_expression,
+                        aspect=aspect,
+                        config=severity_rules,
+                    ),
                     model_confidence=annotation.model_confidence,
                     review_text=review.review_text,
                     rating=review.rating,

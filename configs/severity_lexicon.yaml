@@ -30,7 +30,6 @@ mild_negative_patterns:
   - "ít"
   - "chậm"
   - "xa"
-  - "khó hiểu"
   - "ít lựa chọn"
 
 safety_patterns:

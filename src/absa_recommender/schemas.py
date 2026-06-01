@@ -36,3 +36,18 @@ class AspectExtraction(BaseModel):
     review_text: str
     rating: Optional[int]
     review_time: Optional[datetime]
+
+
+class AspectStats(BaseModel):
+    restaurant_id: str
+    aspect: str
+    mention_count: int
+    negative_count: int
+    positive_count: int
+    neutral_count: int
+    avg_severity: float = Field(ge=0.0, le=1.0)
+    avg_rating: float
+    avg_confidence: float = Field(ge=0.0, le=1.0)
+    total_mentions_for_restaurant: int
+    window_start: Optional[datetime] = None
+    window_end: Optional[datetime] = None
