@@ -1,9 +1,10 @@
 from pathlib import Path
+import sys
 
 import typer
 
-from absa_recommender.io import load_absa_jsonl
-from absa_recommender.recommender import recommend_actions
+from absa_recommender.config import load_label_schema
+from absa_recommender.normalize_absa import flatten_reviews, load_absa_jsonl
 
 app = typer.Typer(help="Local ABSA aspect-to-action recommender.")
 
@@ -15,12 +16,20 @@ def recommend(
         help="Path to ABSA JSONL input.",
     ),
 ) -> None:
-    """Print simple action recommendations for negative aspects."""
-    for record in load_absa_jsonl(input_path):
-        typer.echo(f"{record.review_id} ({record.restaurant_id})")
-        recommendations = recommend_actions(record)
-        if not recommendations:
-            typer.echo("  No negative aspects found.")
+    """Print flattened negative ABSA extractions from JSONL input."""
+    _configure_stdout()
+    schema = load_label_schema("configs/label_schema.yaml")
+    reviews = load_absa_jsonl(input_path)
+    extractions = flatten_reviews(reviews, schema)
+    for extraction in extractions:
+        if extraction.sentiment != "negative":
             continue
-        for item in recommendations:
-            typer.echo(f"  [{item.priority}] {item.aspect}: {item.action} Reason: {item.reason}")
+        typer.echo(
+            f"{extraction.extraction_id} [{extraction.aspect}] "
+            f"{extraction.aspect_term}: {extraction.opinion_text}"
+        )
+
+
+def _configure_stdout() -> None:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
