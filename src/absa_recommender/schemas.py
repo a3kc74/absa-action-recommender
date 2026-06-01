@@ -101,3 +101,26 @@ class ActionRecommendation(BaseModel):
     sub_problem_id: str
     actions: list[str]
     kpis: list[str]
+
+
+class RecommendationItem(BaseModel):
+    rank: int
+    aspect: str
+    sub_problem_id: str
+    sub_problem_label: str
+    priority_score: float = Field(ge=0.0, le=100.0)
+    confidence: float = Field(ge=0.0, le=1.0)
+    severity: float = Field(ge=0.0, le=1.0)
+    mention_count: int
+    negative_count: int
+    opinion_examples: list[str]
+    recommended_actions: list[str]
+    monitoring_kpis: list[str]
+    component_scores: dict[str, float]
+    locator_summary: dict[str, int] | None = None
+
+
+class RecommendationResponse(BaseModel):
+    restaurant_id: str
+    generated_at: datetime
+    recommendations: list[RecommendationItem]

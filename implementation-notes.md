@@ -65,6 +65,7 @@
 - Matching text follows the requested format exactly: `aspect_expression + " | " + opinion_expression`, normalized with the same `normalize_text` helper used by rule matching.
 - The matcher uses `TfidfVectorizer(analyzer="char_wb", ngram_range=(3, 5))`. Cosine similarity is the sparse dot product because scikit-learn normalizes TF-IDF vectors by default.
 - I added a close `muỗng` prototype and a close `món trên menu không còn bán` prototype so the requested tests are deterministic instead of relying on weak similarity to distant examples.
+- Prototype similarity is clamped to `[0, 1]` before schema validation because sparse floating-point dot products can produce tiny overshoots such as `1.0000000000000013`.
 
 ## 2026-06-01: Sub-problem locator
 
@@ -84,3 +85,34 @@
 - Added catalog-facing `ActionRecommendation` to `schemas.py`. The older prototype `models.py` still has a separate `ActionRecommendation` used by the early recommender smoke test; I left that untouched to avoid broad unrelated refactoring.
 - `actions.py` lookup only uses `aspect` and `sub_problem_id`. It deliberately does not accept or read `aspect_expression`, `opinion_expression`, or any evidence-like field.
 - Fallback order is exact `aspect + sub_problem_id`, then the generic action under the same aspect, then `Unknown.generic_unknown_issue` when the aspect itself is absent.
+
+## 2026-06-01: End-to-end recommendation generation
+
+- Read `AGENTS.md` before coding, as requested.
+- Replaced the early prototype `recommender.py` with the actual pipeline over `ABSAReview` and `AspectExtraction`. The old `models.py` remains in the repo for now, but the main recommender path no longer depends on it.
+- Restored `data/samples/absa_outputs.jsonl` to valid UTF-8 Vietnamese text so rule/prototype matching can work end to end.
+- `generate_recommendations` accepts either reviews or pre-flattened extractions. Empty input returns an empty response.
+- The response schema is singular by requirement. For inputs spanning multiple restaurants, `restaurant_id` is set to `"multiple"`; for one restaurant it uses that restaurant ID.
+- Aspect-level priority is computed first, then negative extractions for that restaurant/aspect are located to sub-problems. The top sub-problem per aspect is selected using `compute_subproblem_score`.
+- `priority_score` on `RecommendationItem` is the selected sub-problem score, not the raw parent aspect score. Parent component scores remain attached for auditability.
+- `opinion_examples` are taken from `AspectExtraction.opinion_text`, which came from `opinion_expression`.
+- The Food Safety Top-3 rule is implemented conservatively: if a Food Safety recommendation exists and `top_n >= 3`, it is moved into rank 3 when it would otherwise rank lower.
+
+## 2026-06-01: Taxonomy mining
+
+- Read `AGENTS.md` before coding, as requested.
+- Added `phrase_miner.py`, `taxonomy_miner.py`, and `taxonomy_review.py` as local-only utilities. They generate review artifacts and do not mutate production configs.
+- The miner consumes locator prediction JSONL as dictionaries so it can tolerate future fields. It expects the requested ABSA field names: `aspect_expression`, `opinion_expression`, and `aspect_category`.
+- `SubProblemPrediction` does not currently include `severity`, but taxonomy reports need `avg_severity`. The miner reads optional `severity` if present and otherwise defaults missing severity to `0.0`.
+- Candidate selection includes negative annotations that are generic, weak by locator score, marked `needs_review`, or high-risk and below the high-risk threshold.
+- Clustering uses `TfidfVectorizer(analyzer="char_wb")` with the configured char n-gram range and `AgglomerativeClustering(metric="cosine", linkage="average")`.
+- For one candidate in an aspect, the miner emits a single cluster without fitting a clustering model.
+- `taxonomy_review.py` is intentionally small: it loads/saves reports and marks human review decisions. It does not apply accepted suggestions to config files.
+
+## 2026-06-01: Typer CLI
+
+- Read `AGENTS.md` before coding, as requested.
+- Replaced the initial single-command CLI with explicit commands: `validate`, `recommend`, `inspect-subproblems`, `locate-subproblems`, `mine-taxonomy`, `apply-taxonomy-suggestions`, and `show-labels`.
+- `recommend --restaurant-id` overrides `restaurant_id` on all loaded reviews for that command. The prompt usage implies a single target restaurant output even when the sample file contains multiple restaurant IDs.
+- `locate-subproblems` adds `severity` to each JSONL prediction payload because taxonomy mining can use it when available, while `SubProblemPrediction` itself stays aligned with the requested locator schema.
+- `apply-taxonomy-suggestions` accepts review decisions `approved`, `accept`, or `accepted` and writes only to the requested output path. It never overwrites the original rules file directly.

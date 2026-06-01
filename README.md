@@ -7,7 +7,15 @@ Lightweight local-first repository for an Aspect-to-Action Recommender for Vietn
 ```bash
 uv sync
 uv run pytest
+uv run pytest tests/test_recommender.py
 uv run absa-rec --help
+uv run absa-rec validate --input data/samples/absa_outputs.jsonl
+uv run absa-rec recommend --input data/samples/absa_outputs.jsonl --restaurant-id res_demo --top-n 5 --output out/recommendations.json
+uv run absa-rec inspect-subproblems --input data/samples/absa_outputs.jsonl
+uv run absa-rec locate-subproblems --input data/samples/absa_outputs.jsonl --output out/subproblem_predictions.jsonl
+uv run absa-rec mine-taxonomy --predictions out/subproblem_predictions.jsonl --output-report out/taxonomy_gap_report.yaml --output-csv out/unmatched_annotations.csv
+uv run absa-rec apply-taxonomy-suggestions --reviewed-report out/taxonomy_gap_report.yaml --rules configs/subproblem_rules.yaml --output configs/subproblem_rules.updated.yaml
+uv run absa-rec show-labels
 uv run uvicorn absa_recommender.api:app --reload
 uv run streamlit run app/streamlit_app.py
 ```
@@ -251,3 +259,77 @@ Fallback order:
 `configs/action_catalog.yaml` includes generic fallback actions for all 8 official aspects and `Unknown`.
 
 Run `uv run pytest tests/test_actions.py` to validate action lookup directly.
+
+## End-To-End Recommendations
+
+`generate_recommendations(reviews_or_extractions, top_n=5, config_paths=None, default_restaurant_id="unknown")` runs the local deterministic pipeline:
+
+1. Load configs.
+2. Flatten ABSA reviews into `AspectExtraction`.
+3. Aggregate aspect stats.
+4. Score aspect priority candidates.
+5. Locate sub-problems for negative extractions.
+6. Select the top sub-problem per aspect.
+7. Attach `opinion_examples` from `opinion_text`.
+8. Attach catalog actions and KPIs.
+9. Sort by `priority_score`.
+10. Apply the Food Safety Top-3 rule.
+11. Return Top-N recommendations.
+
+`RecommendationResponse.restaurant_id` is the restaurant ID for single-restaurant input. For multi-restaurant batches, it is `"multiple"`.
+
+The API exposes:
+
+- `POST /flatten` for one `ABSAReview`
+- `POST /recommend` for a list of `ABSAReview` records
+
+Run `uv run pytest tests/test_recommender.py` to validate the end-to-end recommender directly.
+
+## Taxonomy Mining
+
+`src/absa_recommender/taxonomy_miner.py` mines weak or unmatched locator predictions for taxonomy review.
+
+Inputs:
+
+- `subproblem_predictions.jsonl`
+- `configs/subproblem_rules.yaml`
+- `configs/subproblem_prototypes.yaml`
+- `configs/taxonomy_miner.yaml`
+
+Candidate selection uses only negative annotations where at least one is true:
+
+- `predicted_sub_problem_id` starts with `generic_`
+- `locator_score` is below `candidate_filter.weak_score_threshold`
+- `needs_review` is true
+- high-risk aspect and `locator_score` is below `candidate_filter.high_risk_score_threshold`
+
+Cluster text is:
+
+```text
+aspect_expression + " | " + opinion_expression
+```
+
+Outputs:
+
+- `out/taxonomy_gap_report.yaml`
+- `out/unmatched_annotations.csv`
+
+The miner does not auto-update production configs. `taxonomy_review.py` only supports loading/saving reports and marking review decisions.
+
+Run `uv run pytest tests/test_taxonomy_miner.py` to validate taxonomy mining directly.
+
+## CLI
+
+The `absa-rec` Typer CLI exposes local workflow commands:
+
+- `validate`: parse ABSA JSONL, validate labels, and print review/annotation counts.
+- `recommend`: generate recommendation JSON, save it, and print a top recommendation summary.
+- `inspect-subproblems`: print aspect/category text and predicted sub-problem IDs.
+- `locate-subproblems`: write negative-annotation locator predictions to JSONL.
+- `mine-taxonomy`: generate taxonomy review YAML and unmatched annotation CSV.
+- `apply-taxonomy-suggestions`: apply only approved taxonomy report suggestions to a new rules file.
+- `show-labels`: print labels loaded from `configs/label_schema.yaml`.
+
+`apply-taxonomy-suggestions` never overwrites the original rules file directly.
+
+Run `uv run pytest tests/test_cli.py` to validate CLI behavior directly.

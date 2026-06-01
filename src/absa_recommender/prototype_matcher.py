@@ -42,7 +42,7 @@ def match_subproblem_prototype(
     return PrototypeMatch(
         aspect=aspect,
         sub_problem_id=candidates[best_index]["sub_problem_id"],
-        similarity=float(similarities[best_index]),
+        similarity=_clamp(float(similarities[best_index])),
         nearest_prototype_examples=[
             _prototype_example(candidates[index])
             for index in ranked_indexes[: max(1, nearest_count)]
@@ -77,3 +77,7 @@ def _prototype_example(candidate: dict[str, str]) -> dict[str, str]:
         "aspect_expression": candidate["aspect_expression"],
         "opinion_expression": candidate["opinion_expression"],
     }
+
+
+def _clamp(value: float) -> float:
+    return max(0.0, min(1.0, value))
