@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Optional
 
 from pydantic import BaseModel, Field
@@ -124,3 +124,15 @@ class RecommendationResponse(BaseModel):
     restaurant_id: str
     generated_at: datetime
     recommendations: list[RecommendationItem]
+
+
+class FeedbackPayload(BaseModel):
+    implemented: bool
+    implementation_date: Optional[date] = None
+    manager_rating: Optional[int] = Field(default=None, ge=1, le=5)
+    comment: Optional[str] = None
+
+
+class FeedbackResponse(FeedbackPayload):
+    recommendation_id: str
+    status: str = "accepted"

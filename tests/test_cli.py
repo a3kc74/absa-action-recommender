@@ -87,3 +87,38 @@ def test_mine_taxonomy_creates_yaml_and_csv(tmp_path: Path) -> None:
     assert result.exit_code == 0
     assert report.exists()
     assert csv.exists()
+
+
+def test_evaluate_command_outputs_metrics(tmp_path: Path) -> None:
+    output = tmp_path / "recommendations.json"
+    recommend_result = runner.invoke(
+        app,
+        [
+            "recommend",
+            "--input",
+            str(SAMPLE_PATH),
+            "--restaurant-id",
+            "res_demo",
+            "--top-n",
+            "5",
+            "--output",
+            str(output),
+        ],
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "evaluate",
+            "--predictions",
+            str(output),
+            "--gold",
+            "data/gold.json",
+            "--k",
+            "5",
+        ],
+    )
+
+    assert recommend_result.exit_code == 0
+    assert result.exit_code == 0
+    assert "precision_at_k" in result.output

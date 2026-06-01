@@ -1,0 +1,9 @@
+{
+  "restaurant_id": "res_demo",
+  "relevant_sub_problem_ids": [
+    "dirty_tableware",
+    "bland_or_no_flavor",
+    "parking_issue",
+    "menu_item_unavailable"
+  ]
+}

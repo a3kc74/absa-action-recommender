@@ -6,6 +6,7 @@ from typing import Any
 import typer
 
 from absa_recommender.config import load_label_schema, load_yaml
+from absa_recommender.evaluation import evaluate_recommendation_file
 from absa_recommender.normalize_absa import flatten_reviews, load_absa_jsonl
 from absa_recommender.prototype_matcher import load_subproblem_prototypes
 from absa_recommender.recommender import generate_recommendations
@@ -181,6 +182,30 @@ def show_labels() -> None:
     typer.echo("Sentiments:")
     for label in schema.get("sentiments", []):
         typer.echo(f"- {label}")
+
+
+@app.command()
+def evaluate(
+    predictions: Path = typer.Option(
+        Path("out/recommendations.json"),
+        "--predictions",
+        help="Recommendation JSON output.",
+    ),
+    gold: Path = typer.Option(
+        Path("data/gold.json"),
+        "--gold",
+        help="Gold relevance JSON.",
+    ),
+    k: int = typer.Option(5, "--k", min=1, help="Evaluation cutoff."),
+) -> None:
+    """Evaluate recommendation output against a simple gold file."""
+    _configure_stdout()
+    with predictions.open("r", encoding="utf-8") as file:
+        predictions_payload = json.load(file)
+    with gold.open("r", encoding="utf-8") as file:
+        gold_payload = json.load(file)
+    metrics = evaluate_recommendation_file(predictions_payload, gold_payload, k)
+    typer.echo(json.dumps(metrics, ensure_ascii=False, indent=2))
 
 
 def _locate_negative_predictions(input_path: Path) -> list[dict[str, Any]]:

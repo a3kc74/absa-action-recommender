@@ -16,8 +16,11 @@ uv run absa-rec locate-subproblems --input data/samples/absa_outputs.jsonl --out
 uv run absa-rec mine-taxonomy --predictions out/subproblem_predictions.jsonl --output-report out/taxonomy_gap_report.yaml --output-csv out/unmatched_annotations.csv
 uv run absa-rec apply-taxonomy-suggestions --reviewed-report out/taxonomy_gap_report.yaml --rules configs/subproblem_rules.yaml --output configs/subproblem_rules.updated.yaml
 uv run absa-rec show-labels
+uv run absa-rec evaluate --predictions out/recommendations.json --gold data/gold.json --k 5
 uv run uvicorn absa_recommender.api:app --reload
 uv run streamlit run app/streamlit_app.py
+docker compose up api
+docker compose up streamlit
 ```
 
 ## Layout
@@ -280,10 +283,140 @@ Run `uv run pytest tests/test_actions.py` to validate action lookup directly.
 
 The API exposes:
 
-- `POST /flatten` for one `ABSAReview`
-- `POST /recommend` for a list of `ABSAReview` records
+- `GET /health`
+- `GET /api/v1/labels`
+- `POST /api/v1/recommendations/from-absa?top_n=5`
+- `POST /api/v1/subproblems/locate`
+- `POST /api/v1/taxonomy/mine`
+- `POST /api/v1/recommendations/{recommendation_id}/feedback`
 
 Run `uv run pytest tests/test_recommender.py` to validate the end-to-end recommender directly.
+
+Run `uv run pytest tests/test_api.py` to validate API behavior directly.
+
+## Docker
+
+Build and run the FastAPI service:
+
+```bash
+docker compose up api
+```
+
+Run the Streamlit dashboard:
+
+```bash
+docker compose up streamlit
+```
+
+Compose mounts `./data` and `./configs` into the containers so local samples and YAML configs remain editable without rebuilding the image.
+
+## Streamlit Dashboard
+
+Run:
+
+```bash
+uv run streamlit run app/streamlit_app.py
+```
+
+The local dashboard supports:
+
+- JSONL ABSA upload, with bundled sample fallback
+- default `restaurant_id` for records where it is missing
+- Top-N recommendation generation
+- configured label display
+- recommendation cards with scores, examples, actions, KPIs, and component scores
+- Sub-problem Locator tab with `aspect_category`, `aspect_expression`, `opinion_expression`, predicted sub-problem, locator score, match type, and review flag
+- Taxonomy Gaps tab with in-memory weak/generic prediction mining and YAML export
+
+No authentication or database is required.
+
+## DuckDB Storage
+
+`src/absa_recommender/storage.py` provides optional local persistence with DuckDB.
+
+Functions:
+
+- `init_db(db_path)`
+- `save_recommendation_run(db_path, response, input_hash, scoring_config_hash, model_version="unknown")`
+- `save_recommendation_items(db_path, run_id, response)`
+- `save_subproblem_predictions(db_path, predictions, run_id=None)`
+- `save_taxonomy_gap_report(db_path, report, run_id=None)`
+- `save_feedback(db_path, recommendation_id, implemented, implementation_date, manager_rating, comment)`
+- `list_runs(db_path, restaurant_id=None)`
+- `get_run(db_path, run_id)`
+
+Tables:
+
+- `recommendation_runs`
+- `recommendation_items`
+- `subproblem_predictions`
+- `taxonomy_gap_reports`
+- `feedback`
+
+Run `uv run pytest tests/test_storage.py` to validate storage behavior directly.
+
+## Evaluation
+
+`src/absa_recommender/evaluation.py` provides lightweight offline metrics:
+
+- `recommendation_coverage`
+- `subproblem_coverage`
+- `generic_subproblem_rate`
+- `weak_match_rate`
+- `action_coverage`
+- `precision_at_k`
+- `recall_at_k`
+- `ndcg_at_k`
+- `stability_score`
+
+Gold format:
+
+```json
+{
+  "restaurant_id": "res_demo",
+  "relevant_sub_problem_ids": [
+    "dirty_tableware",
+    "bland_or_no_flavor",
+    "parking_issue",
+    "menu_item_unavailable"
+  ]
+}
+```
+
+CLI:
+
+```bash
+uv run absa-rec evaluate --predictions out/recommendations.json --gold data/gold.json --k 5
+```
+
+Run `uv run pytest tests/test_evaluation.py` to validate evaluation metrics directly.
+
+## Monitoring
+
+`src/absa_recommender/monitoring.py` provides local monitoring metrics:
+
+- `recommendation_coverage`
+- `subproblem_coverage`
+- `generic_subproblem_rate`
+- `weak_match_rate`
+- `action_coverage`
+- `avg_locator_score`
+- `generic_rate_by_aspect`
+- `weak_match_rate_by_aspect`
+- `food_safety_unreviewed_count`
+- `cleanliness_unreviewed_count`
+- `top_unmatched_opinion_phrases`
+
+Use `build_monitoring_snapshot(...)` to compute the full metric set plus suggested alerts.
+
+Suggested alert logic:
+
+- `generic_subproblem_rate > 25%`: run taxonomy miner
+- `Menu` generic rate `> 35%`: Menu taxonomy likely lacks rules
+- Food Safety weak/generic count `> 0`: review immediately
+- Cleanliness weak/generic count above threshold: manual review
+
+Run `uv run pytest tests/test_monitoring.py` to validate monitoring behavior directly.
 
 ## Taxonomy Mining
 

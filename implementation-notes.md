@@ -116,3 +116,55 @@
 - `recommend --restaurant-id` overrides `restaurant_id` on all loaded reviews for that command. The prompt usage implies a single target restaurant output even when the sample file contains multiple restaurant IDs.
 - `locate-subproblems` adds `severity` to each JSONL prediction payload because taxonomy mining can use it when available, while `SubProblemPrediction` itself stays aligned with the requested locator schema.
 - `apply-taxonomy-suggestions` accepts review decisions `approved`, `accept`, or `accepted` and writes only to the requested output path. It never overwrites the original rules file directly.
+
+## 2026-06-01: FastAPI API
+
+- Read `AGENTS.md` before coding, as requested.
+- Replaced the earlier minimal API with versioned `/api/v1/*` routes while preserving `GET /health`.
+- API routes call the same core functions as the CLI: recommendation generation, label loading, flattening, sub-problem location, and taxonomy mining.
+- `POST /api/v1/subproblems/locate` returns `SubProblemPrediction` objects using `aspect_expression` and `opinion_expression`; it does not expose an `evidence` field.
+- `POST /api/v1/taxonomy/mine` returns the report in memory and does not write or mutate config files.
+- Feedback is accepted and echoed without persistence for now, as requested.
+- API tests call route functions directly because the installed Starlette test client requires an extra `httpx2` dependency that is not otherwise needed by the project. This keeps the dependency list unchanged.
+
+## 2026-06-02: Streamlit dashboard
+
+- Read `AGENTS.md` before coding, as requested.
+- Replaced the earlier sample-only Streamlit viewer with a local workflow dashboard for upload, recommendations, locator inspection, and taxonomy gap review.
+- The app defaults to `data/samples/absa_outputs.jsonl` when no file is uploaded so it remains immediately usable.
+- The default `restaurant_id` text input is passed through to flattening/recommendation generation for records missing `restaurant_id`; it does not overwrite existing restaurant IDs.
+- The Taxonomy Gaps tab mines from in-memory locator predictions and exposes a YAML download. It does not write files or mutate configs.
+- I avoided importing pandas directly in the app because it is not a declared project dependency; Streamlit renders list-of-dict dataframes directly.
+
+## 2026-06-02: DuckDB storage
+
+- Read `AGENTS.md` before coding, as requested.
+- Added `storage.py` as a lightweight local persistence layer using the existing `duckdb` dependency.
+- IDs are generated with UUID4 prefixes (`run_`, `pred_`, `report_`, `feedback_`) except recommendation item IDs, which use `run_id_rank_<rank>` for stable item references within a run.
+- `save_recommendation_run` persists the run and then saves recommendation items in the same public call. `save_recommendation_items` remains available for explicit item persistence if needed.
+- JSON-heavy fields are stored as UTF-8 JSON strings. `get_run` returns both `output_json` and parsed `output` for convenience.
+- The storage layer does not enforce foreign keys. This keeps the schema simple and local-first; tests verify the expected inserts and lookups.
+
+## 2026-06-02: Evaluation utilities
+
+- Read `AGENTS.md` before coding, as requested.
+- Added `evaluation.py` with lightweight ranking metrics and coverage helpers. The functions are pure and do not depend on any storage or service layer.
+- `recommendation_coverage`, `subproblem_coverage`, and `action_coverage` return simple summary rates/counts intended for smoke evaluation rather than formal offline experiments.
+- `stability_score` is implemented as overlap@k because the prompt named it `stability overlap@k`.
+- Added `data/gold.json` in the requested gold format for local CLI evaluation examples.
+- Added `absa-rec evaluate`, which reads recommendation JSON plus a gold JSON file and prints precision@k, recall@k, and nDCG@k.
+
+## 2026-06-02: Monitoring
+
+- Added `monitoring.py` as a lightweight metrics layer over recommendation responses and sub-problem locator predictions.
+- Monitoring reuses evaluation helpers where possible and adds locator-specific metrics: average locator score, generic/weak rates by aspect, high-risk unreviewed counts, and top unmatched opinion phrases.
+- `food_safety_unreviewed_count` and `cleanliness_unreviewed_count` count weak, generic, or explicitly `needs_review` predictions for their aspect unless the row has `reviewed=true`.
+- Suggested alerts are returned as data dictionaries instead of raising exceptions or sending notifications. This keeps the module local-first and UI/API-friendly.
+- The suggested alert thresholds follow the phase prompt: overall generic rate over 25%, Menu generic rate over 35%, any Food Safety weak/generic item, and Cleanliness count above a configurable threshold.
+
+## 2026-06-02: Docker deployment
+
+- Added a lightweight `Dockerfile` based on `python:3.12-slim`, with `uv` installed via `pip`.
+- The Docker build copies `pyproject.toml` and optional `uv.lock` first, runs `uv sync --frozen`, then copies `src`, `configs`, `app`, and `README.md`.
+- Added `docker-compose.yml` with separate `api` and `streamlit` services sharing the same image build. Both mount `./data` and `./configs` so local files remain editable.
+- Added `.dockerignore` to keep local virtualenvs, caches, output files, and DuckDB files out of the build context.
