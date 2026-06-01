@@ -146,3 +146,49 @@ For MVP, `trend_score` is expected to be `0.0` when review time is unavailable, 
 All component functions clamp outputs to `[0, 1]`; final `priority_score` is clamped to `[0, 100]`.
 
 Run `uv run pytest tests/test_scoring.py` to validate scoring directly.
+
+## Sub-Problem Detection
+
+`src/absa_recommender/subproblem.py` implements rule-first sub-problem detection using the actual flattened ABSA fields:
+
+- `aspect` from `aspect_category`
+- `aspect_term` from `aspect_expression`
+- `opinion_text` from `opinion_expression`
+
+Rules are loaded from `configs/subproblem_rules.yaml`. The supported config keys are:
+
+- `aspect_expression_patterns`
+- `opinion_expression_patterns`
+
+Do not use `aspect_terms`, `opinion_patterns`, or `evidence_patterns`.
+
+Rule scoring:
+
+- `+2` for each matched `opinion_expression_pattern`
+- `+1` for each matched `aspect_expression_pattern`
+- `+ priority / 100` after at least one aspect or opinion pattern matches
+
+Only rules under the same aspect are considered. If no rule scores above zero, the matcher returns `generic_<aspect_slug>_issue` with label `Vấn đề chung về <aspect>`.
+
+`group_extractions_by_subproblem` groups by `(restaurant_id, aspect, sub_problem_id)`. `compute_subproblem_score` returns a `[0, 100]` sub-problem score from the parent aspect priority score, group share, and average severity.
+
+Run `uv run pytest tests/test_subproblem.py` to validate rule matching directly.
+
+## Prototype Matcher
+
+`src/absa_recommender/prototype_matcher.py` provides TF-IDF fallback matching for language variants not covered by rules.
+
+Prototype examples live in `configs/subproblem_prototypes.yaml` and use:
+
+- `aspect_expression`
+- `opinion_expression`
+
+Matching text is built as:
+
+```text
+aspect_expression + " | " + opinion_expression
+```
+
+The matcher uses `TfidfVectorizer(analyzer="char_wb", ngram_range=(3, 5))` and only compares prototypes under the same aspect. It returns the nearest `sub_problem_id`, cosine similarity, and nearest prototype examples.
+
+Run `uv run pytest tests/test_prototype_matcher.py` to validate prototype matching directly.

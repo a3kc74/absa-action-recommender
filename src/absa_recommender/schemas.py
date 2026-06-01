@@ -62,3 +62,19 @@ class AspectRecommendationCandidate(BaseModel):
     mention_count: int
     negative_count: int
     component_scores: dict[str, float]
+
+
+class SubProblemMatch(BaseModel):
+    aspect: str
+    sub_problem_id: str
+    sub_problem_label: str
+    matched_aspect_expression_patterns: list[str]
+    matched_opinion_expression_patterns: list[str]
+    score: float
+
+
+class PrototypeMatch(BaseModel):
+    aspect: str
+    sub_problem_id: str | None
+    similarity: float = Field(ge=0.0, le=1.0)
+    nearest_prototype_examples: list[dict[str, str]]

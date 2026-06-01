@@ -44,3 +44,24 @@
   - `benchmark_gap = max(0, neg_rate - peer_avg_neg_rate)`, and returns `0.0` when peer data is unavailable.
 - `compute_priority_score` only computes the numeric priority score. Candidate assembly is intentionally left to the recommender layer so sub-problem/action mapping can be added later without coupling it to score math.
 - Risk multipliers come from `scoring.risk_multiplier`; missing aspects use `scoring.defaults.risk_multiplier_if_missing`.
+
+## 2026-06-01: Rule-first sub-problem detection
+
+- Read `AGENTS.md` before coding, as requested.
+- Replaced `configs/subproblem_rules.yaml` with valid UTF-8 Vietnamese text. The existing file had mojibake from pasted source material, so rule matching against actual Vietnamese ABSA fields would fail.
+- `subproblem.py` only reads `aspect_expression_patterns` and `opinion_expression_patterns`; it does not use the disallowed `aspect_terms`, `opinion_patterns`, or `evidence_patterns` keys.
+- Rule matching only considers rules under the same normalized aspect.
+- I add `priority / 100` only after at least one aspect or opinion pattern matches. If priority were added to every rule unconditionally, generic fallback could never happen for any aspect that has configured rules.
+- `group_extractions_by_subproblem` returns a dictionary keyed by `(restaurant_id, aspect, sub_problem_id)` because the prompt did not prescribe a return shape. This keeps grouping usable for downstream restaurant/aspect recommendations.
+- `compute_subproblem_score` returns a `[0, 100]` score by multiplying the parent aspect priority score by a weighted blend of `group_share` and `avg_severity`: `(1 - beta) * group_share + beta * avg_severity`.
+- Generic fallback IDs slugify the aspect with underscores, for example `Food Quality` -> `generic_food_quality_issue`.
+
+## 2026-06-01: TF-IDF prototype matcher
+
+- Read `AGENTS.md` before coding, as requested.
+- Replaced `configs/subproblem_prototypes.yaml` with valid UTF-8 Vietnamese text. The previous file had mojibake and would not match actual ABSA annotation text reliably.
+- Added `PrototypeMatch` to `schemas.py` to make prototype matcher returns stable and validated.
+- `prototype_matcher.py` compares only prototypes under the same aspect. If the aspect has no prototypes, it returns `sub_problem_id=None`, `similarity=0.0`, and no nearest examples.
+- Matching text follows the requested format exactly: `aspect_expression + " | " + opinion_expression`, normalized with the same `normalize_text` helper used by rule matching.
+- The matcher uses `TfidfVectorizer(analyzer="char_wb", ngram_range=(3, 5))`. Cosine similarity is the sparse dot product because scikit-learn normalizes TF-IDF vectors by default.
+- I added a close `muỗng` prototype and a close `món trên menu không còn bán` prototype so the requested tests are deterministic instead of relying on weak similarity to distant examples.

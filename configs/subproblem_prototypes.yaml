@@ -15,6 +15,8 @@ Cleanliness:
         opinion_expression: "chưa được rửa và rất bẩn"
       - aspect_expression: "thìa"
         opinion_expression: "vết bẩn đen đen có lẽ là nấm mốc"
+      - aspect_expression: "muỗng"
+        opinion_expression: "có vệt đen nhìn dơ"
       - aspect_expression: "ly"
         opinion_expression: "bẩn"
 
@@ -33,6 +35,8 @@ Menu:
         opinion_expression: "ghi có món nhưng đến nơi lại hết món"
       - aspect_expression: "món trên menu"
         opinion_expression: "không bán dù vẫn ghi trong menu"
+      - aspect_expression: "menu"
+        opinion_expression: "món trên menu không còn bán"
 
 Location:
   parking_issue:
