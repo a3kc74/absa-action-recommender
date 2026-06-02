@@ -1,0 +1,7 @@
+model:
+  provider: external
+  version: unknown
+  language: vi
+inference:
+  batch_size: 32
+  low_confidence_threshold: 0.50

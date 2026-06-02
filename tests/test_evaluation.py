@@ -1,45 +1,39 @@
 from absa_recommender.evaluation import (
-    generic_subproblem_rate,
-    ndcg_at_k,
-    precision_at_k,
-    recall_at_k,
-    stability_score,
-    weak_match_rate,
+    aspect_coverage,
+    peer_support_rate,
+    priority_score_stability,
 )
 
 
-def test_precision_at_k() -> None:
-    assert precision_at_k(["a", "b", "c"], ["a", "x"], 2) == 0.5
+def test_aspect_coverage() -> None:
+    coverage = aspect_coverage(
+        [
+            {"aspect": "Service", "mention_count": 5},
+            {"aspect": "Menu", "mention_count": 0},
+        ],
+        minimum_mentions=1,
+    )
+
+    assert coverage["aspect_count"] == 1
+    assert coverage["aspects"] == ["Service"]
 
 
-def test_recall_at_k() -> None:
-    assert recall_at_k(["a", "b", "c"], ["a", "b", "x", "y"], 3) == 0.5
+def test_peer_support_rate() -> None:
+    rate = peer_support_rate(
+        [
+            {"peer_summary": {}, "data_quality_flags": []},
+            {"peer_summary": {"peer_support_flag": "low_peer_support"}, "data_quality_flags": []},
+        ]
+    )
+
+    assert rate == 0.5
 
 
-def test_ndcg_at_k() -> None:
-    score = ndcg_at_k(["a", "b", "c"], {"a": 3, "b": 2, "c": 1}, 3)
+def test_priority_score_stability() -> None:
+    stability = priority_score_stability(
+        [{"aspect": "Service", "priority_score": 50}],
+        [{"aspect": "Service", "priority_score": 85}],
+    )
 
-    assert score == 1.0
-
-
-def test_stability_overlap_at_k() -> None:
-    assert stability_score(["a", "b", "c"], ["b", "c", "d"], 2) == 0.5
-
-
-def test_generic_subproblem_rate() -> None:
-    predictions = [
-        {"predicted_sub_problem_id": "generic_menu_issue"},
-        {"predicted_sub_problem_id": "dirty_tableware"},
-    ]
-
-    assert generic_subproblem_rate(predictions) == 0.5
-
-
-def test_weak_match_rate() -> None:
-    predictions = [
-        {"locator_score": 0.30},
-        {"locator_score": 0.80},
-        {"locator_score": 0.44},
-    ]
-
-    assert weak_match_rate(predictions, threshold=0.45) == 2 / 3
+    assert stability["max_delta"] == 35
+    assert stability["unstable_count"] == 1

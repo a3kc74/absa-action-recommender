@@ -1,0 +1,6 @@
+target_month_delay_days: 3
+max_reviews_per_restaurant: 200
+source_adapter: local_jsonl
+retry:
+  max_attempts: 3
+  backoff_seconds: 5

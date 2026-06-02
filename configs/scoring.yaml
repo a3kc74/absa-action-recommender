@@ -3,17 +3,22 @@ scoring:
     negative_rate: 0.25
     sentiment_severity: 0.18
     mention_share: 0.12
-    rating_gap: 0.15
-    trend_score: 0.15
-    benchmark_gap: 0.15
+    rating_gap: 0.12
+    trend_score: 0.16
+    benchmark_gap: 0.17
 
   smoothing:
     alpha: 10
 
   confidence:
     support_threshold_tau: 30
-    lambda_support: 0.70
+    peer_support_tau: 100
     default_missing_confidence: 0.75
+    weights:
+      support: 0.45
+      model: 0.30
+      peer: 0.15
+      history: 0.10
 
   risk_multiplier:
     Food Safety: 1.20
@@ -26,7 +31,19 @@ scoring:
     Menu: 1.00
     Unknown: 0.70
 
-  safety_rules:
+  trend:
+    mode: previous_month
+    negative_scale: 0.25
+    severity_scale: 0.30
+    min_mentions_current: 5
+    min_mentions_previous: 5
+
+  benchmark:
+    min_peer_restaurants: 5
+    min_peer_mentions_per_aspect: 20
+    benchmark_scale: 0.30
+
+  ranking:
     force_food_safety_top3: true
     food_safety_negative_threshold: 0.10
 

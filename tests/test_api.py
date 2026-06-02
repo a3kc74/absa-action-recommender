@@ -1,89 +1,46 @@
-import json
 from pathlib import Path
 
 from absa_recommender.api import (
+    aspect_history,
     health,
     labels,
-    locate_subproblems,
-    mine_taxonomy,
-    recommendation_feedback,
-    recommendations_from_absa,
+    monthly_run,
+    peer_benchmark,
+    priority_from_absa,
+    restaurant_dashboard,
+    restaurant_history,
+    restaurant_priority,
 )
-from absa_recommender.schemas import ABSAReview, FeedbackPayload
+from absa_recommender.normalize_absa import load_absa_jsonl
 
 
 SAMPLE_PATH = Path("data/samples/absa_outputs.jsonl")
 
 
-def test_health_works() -> None:
+def test_health() -> None:
     assert health() == {"status": "ok"}
 
 
-def test_labels_include_location_and_menu() -> None:
+def test_labels_include_official_aspects() -> None:
     payload = labels()
 
-    assert "Location" in payload["aspects"]
+    assert "Food Quality" in payload["aspects"]
     assert "Menu" in payload["aspects"]
 
 
-def test_recommendations_from_absa_returns_recommendations() -> None:
-    response = recommendations_from_absa(_sample_reviews(), top_n=5)
+def test_priority_from_absa_returns_items() -> None:
+    response = priority_from_absa(load_absa_jsonl(SAMPLE_PATH), top_n=5, restaurant_id="res_demo")
 
-    assert response.recommendations
-
-
-def test_subproblems_locate_returns_opinion_expression_fields() -> None:
-    payload = locate_subproblems(_sample_reviews())
-    first = payload[0].model_dump(mode="json")
-
-    assert payload
-    assert "opinion_expression" in first
-    assert "evidence" not in first
+    assert response.items
+    assert response.items[0].rank == 1
 
 
-def test_taxonomy_mine_returns_clusters_for_weak_annotations() -> None:
-    payload = mine_taxonomy([_weak_prediction()])
+def test_monthly_and_dashboard_routes_have_priority_shape() -> None:
+    monthly = monthly_run(load_absa_jsonl(SAMPLE_PATH), top_n=3, restaurant_id="res_demo")
 
-    assert "Menu" in payload
-    assert payload["Menu"]["clusters"]
-
-
-def test_feedback_returns_accepted_payload() -> None:
-    payload = recommendation_feedback(
-        "rec_001",
-        FeedbackPayload(
-            implemented=True,
-            implementation_date="2026-06-01",
-            manager_rating=5,
-            comment="Done",
-        ),
-    )
-
-    assert payload.recommendation_id == "rec_001"
-    assert payload.status == "accepted"
-    assert payload.implemented is True
-
-
-def _sample_reviews() -> list[ABSAReview]:
-    return [
-        ABSAReview.model_validate(json.loads(line))
-        for line in SAMPLE_PATH.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
-
-
-def _weak_prediction() -> dict:
-    return {
-        "review_id": "weak_01",
-        "aspect_category": "Menu",
-        "aspect_expression": "combo",
-        "opinion_expression": "không rõ gồm món gì",
-        "sentiment": "negative",
-        "model_confidence": 0.80,
-        "predicted_sub_problem_id": "generic_menu_issue",
-        "sub_problem_label": "Vấn đề chung về Menu",
-        "locator_score": 0.30,
-        "match_type": "generic",
-        "needs_review": True,
-        "severity": 0.75,
-    }
+    assert monthly.items
+    assert restaurant_priority("res_demo", "2026-06")["status"] == "no_persisted_run"
+    assert "overview" in restaurant_dashboard("res_demo", "2026-06")
+    assert restaurant_history("res_demo")["runs"] == []
+    assert aspect_history("res_demo", "Cleanliness")["history"] == []
+    assert peer_benchmark("res_demo", "2026-06")["items"] == []

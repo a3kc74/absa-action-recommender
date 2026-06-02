@@ -1,191 +1,142 @@
-from collections import defaultdict
 from typing import Any
 
-from absa_recommender.evaluation import (
-    action_coverage,
-    generic_subproblem_rate,
-    recommendation_coverage,
-    subproblem_coverage,
-    weak_match_rate,
-)
-from absa_recommender.phrase_miner import top_opinion_phrases
+from absa_recommender.evaluation import aspect_coverage, peer_support_rate
 
 
 def build_monitoring_snapshot(
-    recommendation_responses: list[Any] | None = None,
-    predictions: list[dict[str, Any]] | None = None,
-    weak_threshold: float = 0.45,
-    cleanliness_unreviewed_threshold: int = 0,
-    top_phrase_limit: int = 10,
+    crawl_runs: list[dict[str, Any]] | None = None,
+    reviews: list[dict[str, Any]] | None = None,
+    annotations: list[dict[str, Any]] | None = None,
+    priority_items: list[dict[str, Any]] | None = None,
+    dashboard_generated_at: str | None = None,
+    latest_crawl_finished_at: str | None = None,
+    low_confidence_threshold: float = 0.50,
 ) -> dict[str, Any]:
-    responses = recommendation_responses or []
-    prediction_rows = predictions or []
-    recommendations = [
-        item
-        for response in responses
-        for item in _recommendation_items(response)
-    ]
-    return {
-        "recommendation_coverage": recommendation_coverage(responses),
-        "subproblem_coverage": subproblem_coverage(prediction_rows),
-        "generic_subproblem_rate": generic_subproblem_rate(prediction_rows),
-        "weak_match_rate": weak_match_rate(prediction_rows, threshold=weak_threshold),
-        "action_coverage": action_coverage(recommendations),
-        "avg_locator_score": avg_locator_score(prediction_rows),
-        "generic_rate_by_aspect": generic_rate_by_aspect(prediction_rows),
-        "weak_match_rate_by_aspect": weak_match_rate_by_aspect(
-            prediction_rows,
-            threshold=weak_threshold,
+    crawl_rows = crawl_runs or []
+    review_rows = reviews or []
+    annotation_rows = annotations or []
+    item_rows = priority_items or []
+    snapshot = {
+        "crawl_success_rate": crawl_success_rate(crawl_rows),
+        "reviews_fetched_count": reviews_fetched_count(crawl_rows, review_rows),
+        "new_review_count": new_review_count(crawl_rows, review_rows),
+        "duplicate_rate": duplicate_rate(crawl_rows),
+        "missing_review_time_rate": missing_review_time_rate(review_rows),
+        "absa_inference_failure_rate": absa_inference_failure_rate(annotation_rows),
+        "low_confidence_annotation_rate": low_confidence_annotation_rate(
+            annotation_rows,
+            threshold=low_confidence_threshold,
         ),
-        "food_safety_unreviewed_count": unreviewed_weak_or_generic_count(
-            prediction_rows,
-            "Food Safety",
-            threshold=weak_threshold,
-        ),
-        "cleanliness_unreviewed_count": unreviewed_weak_or_generic_count(
-            prediction_rows,
-            "Cleanliness",
-            threshold=weak_threshold,
-        ),
-        "top_unmatched_opinion_phrases": top_unmatched_opinion_phrases(
-            prediction_rows,
-            limit=top_phrase_limit,
-            threshold=weak_threshold,
-        ),
-        "alerts": suggest_monitoring_alerts(
-            prediction_rows,
-            weak_threshold=weak_threshold,
-            cleanliness_unreviewed_threshold=cleanliness_unreviewed_threshold,
+        "aspect_coverage": aspect_coverage(item_rows),
+        "peer_support_rate": peer_support_rate(item_rows),
+        "dashboard_data_freshness": dashboard_data_freshness(
+            dashboard_generated_at,
+            latest_crawl_finished_at,
         ),
     }
+    snapshot["alerts"] = suggest_monitoring_alerts(snapshot)
+    return snapshot
 
 
-def avg_locator_score(predictions: list[dict[str, Any]]) -> float:
-    if not predictions:
+def crawl_success_rate(crawl_runs: list[dict[str, Any]]) -> float:
+    if not crawl_runs:
         return 0.0
-    return sum(float(prediction.get("locator_score", 0.0)) for prediction in predictions) / len(
-        predictions
-    )
+    successes = sum(str(run.get("status", "")).lower() == "success" for run in crawl_runs)
+    return successes / len(crawl_runs)
 
 
-def generic_rate_by_aspect(predictions: list[dict[str, Any]]) -> dict[str, float]:
-    grouped = _group_by_aspect(predictions)
+def reviews_fetched_count(crawl_runs: list[dict[str, Any]], reviews: list[dict[str, Any]]) -> int:
+    if crawl_runs:
+        return sum(int(run.get("num_reviews_fetched", 0)) for run in crawl_runs)
+    return len(reviews)
+
+
+def new_review_count(crawl_runs: list[dict[str, Any]], reviews: list[dict[str, Any]]) -> int:
+    if crawl_runs:
+        return sum(int(run.get("num_reviews_inserted", 0)) for run in crawl_runs)
+    return sum(not bool(review.get("is_duplicate", False)) for review in reviews)
+
+
+def duplicate_rate(crawl_runs: list[dict[str, Any]]) -> float:
+    inserted = sum(int(run.get("num_reviews_inserted", 0)) for run in crawl_runs)
+    duplicates = sum(int(run.get("num_duplicates", 0)) for run in crawl_runs)
+    total = inserted + duplicates
+    if total <= 0:
+        return 0.0
+    return duplicates / total
+
+
+def missing_review_time_rate(reviews: list[dict[str, Any]]) -> float:
+    if not reviews:
+        return 0.0
+    missing = sum(not review.get("review_time") for review in reviews)
+    return missing / len(reviews)
+
+
+def absa_inference_failure_rate(annotations: list[dict[str, Any]]) -> float:
+    if not annotations:
+        return 0.0
+    failed = sum(str(row.get("status", "success")).lower() == "failed" for row in annotations)
+    return failed / len(annotations)
+
+
+def low_confidence_annotation_rate(
+    annotations: list[dict[str, Any]],
+    threshold: float = 0.50,
+) -> float:
+    if not annotations:
+        return 0.0
+    low = sum(float(row.get("model_confidence") or 0.0) < threshold for row in annotations)
+    return low / len(annotations)
+
+
+def dashboard_data_freshness(
+    dashboard_generated_at: str | None,
+    latest_crawl_finished_at: str | None,
+) -> dict[str, Any]:
     return {
-        aspect: generic_subproblem_rate(rows)
-        for aspect, rows in grouped.items()
+        "dashboard_generated_at": dashboard_generated_at,
+        "latest_crawl_finished_at": latest_crawl_finished_at,
+        "is_stale": bool(
+            dashboard_generated_at
+            and latest_crawl_finished_at
+            and dashboard_generated_at < latest_crawl_finished_at
+        ),
     }
 
 
-def weak_match_rate_by_aspect(
-    predictions: list[dict[str, Any]],
-    threshold: float = 0.45,
-) -> dict[str, float]:
-    grouped = _group_by_aspect(predictions)
-    return {
-        aspect: weak_match_rate(rows, threshold=threshold)
-        for aspect, rows in grouped.items()
-    }
-
-
-def unreviewed_weak_or_generic_count(
-    predictions: list[dict[str, Any]],
-    aspect: str,
-    threshold: float = 0.45,
-) -> int:
-    return sum(
-        prediction.get("aspect_category") == aspect
-        and not bool(prediction.get("reviewed", False))
-        and (
-            str(prediction.get("predicted_sub_problem_id", "")).startswith("generic_")
-            or float(prediction.get("locator_score", 0.0)) < threshold
-            or bool(prediction.get("needs_review", False))
-        )
-        for prediction in predictions
-    )
-
-
-def top_unmatched_opinion_phrases(
-    predictions: list[dict[str, Any]],
-    limit: int = 10,
-    threshold: float = 0.45,
-) -> list[str]:
-    unmatched = [
-        prediction
-        for prediction in predictions
-        if str(prediction.get("predicted_sub_problem_id", "")).startswith("generic_")
-        or float(prediction.get("locator_score", 0.0)) < threshold
-        or bool(prediction.get("needs_review", False))
-    ]
-    return top_opinion_phrases(unmatched, limit)
-
-
-def suggest_monitoring_alerts(
-    predictions: list[dict[str, Any]],
-    weak_threshold: float = 0.45,
-    generic_rate_threshold: float = 0.25,
-    menu_generic_rate_threshold: float = 0.35,
-    cleanliness_unreviewed_threshold: int = 0,
-) -> list[dict[str, Any]]:
+def suggest_monitoring_alerts(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
     alerts: list[dict[str, Any]] = []
-    generic_rate = generic_subproblem_rate(predictions)
-    generic_by_aspect = generic_rate_by_aspect(predictions)
-    food_safety_count = unreviewed_weak_or_generic_count(
-        predictions,
-        "Food Safety",
-        threshold=weak_threshold,
-    )
-    cleanliness_count = unreviewed_weak_or_generic_count(
-        predictions,
-        "Cleanliness",
-        threshold=weak_threshold,
-    )
-
-    if generic_rate > generic_rate_threshold:
+    if snapshot.get("crawl_success_rate", 1.0) < 0.90:
         alerts.append(
             {
-                "metric": "generic_subproblem_rate",
-                "value": generic_rate,
-                "message": "Generic sub-problem rate is high; run taxonomy miner.",
+                "metric": "crawl_success_rate",
+                "value": snapshot.get("crawl_success_rate"),
+                "message": "Crawl success rate is below 90%; check source adapter or quota.",
             }
         )
-    if generic_by_aspect.get("Menu", 0.0) > menu_generic_rate_threshold:
+    if snapshot.get("peer_support_rate", 1.0) < 0.70:
         alerts.append(
             {
-                "metric": "generic_rate_by_aspect.Menu",
-                "value": generic_by_aspect["Menu"],
-                "message": "Menu taxonomy is likely missing rules.",
+                "metric": "peer_support_rate",
+                "value": snapshot.get("peer_support_rate"),
+                "message": "Peer support is below 70%; widen area or review peer filters.",
             }
         )
-    if food_safety_count > 0:
+    if snapshot.get("missing_review_time_rate", 0.0) > 0.30:
         alerts.append(
             {
-                "metric": "food_safety_unreviewed_count",
-                "value": food_safety_count,
-                "message": "Food Safety weak/generic annotations require immediate review.",
+                "metric": "missing_review_time_rate",
+                "value": snapshot.get("missing_review_time_rate"),
+                "message": "More than 30% of reviews are missing review_time; trend may be unreliable.",
             }
         )
-    if cleanliness_count > cleanliness_unreviewed_threshold:
+    if snapshot.get("low_confidence_annotation_rate", 0.0) > 0.25:
         alerts.append(
             {
-                "metric": "cleanliness_unreviewed_count",
-                "value": cleanliness_count,
-                "message": "Cleanliness weak/generic annotations require manual review.",
+                "metric": "low_confidence_annotation_rate",
+                "value": snapshot.get("low_confidence_annotation_rate"),
+                "message": "Low-confidence annotation rate is above 25%; check ABSA model quality.",
             }
         )
     return alerts
-
-
-def _group_by_aspect(predictions: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
-    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for prediction in predictions:
-        grouped[prediction.get("aspect_category", "Unknown")].append(prediction)
-    return dict(grouped)
-
-
-def _recommendation_items(response: Any) -> list[dict[str, Any]]:
-    if isinstance(response, dict):
-        return list(response.get("recommendations", []))
-    return [
-        item.model_dump(mode="json") if hasattr(item, "model_dump") else item
-        for item in getattr(response, "recommendations", [])
-    ]

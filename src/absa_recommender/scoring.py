@@ -68,10 +68,40 @@ def combined_confidence(
     return _clamp(support_weight * support_conf + (1.0 - support_weight) * model_conf)
 
 
+def priority_confidence(
+    support_conf: float,
+    model_conf: float,
+    peer_conf: float,
+    history_conf: float,
+    config: dict[str, Any],
+) -> float:
+    scoring = _scoring_section(config)
+    weights = scoring.get("confidence", {}).get(
+        "weights",
+        {"support": 0.45, "model": 0.30, "peer": 0.15, "history": 0.10},
+    )
+    return _clamp(
+        float(weights.get("support", 0.45)) * _clamp(support_conf)
+        + float(weights.get("model", 0.30)) * _clamp(model_conf)
+        + float(weights.get("peer", 0.15)) * _clamp(peer_conf)
+        + float(weights.get("history", 0.10)) * _clamp(history_conf)
+    )
+
+
 def benchmark_gap(neg_rate: float, peer_avg_neg_rate: float | None) -> float:
     if peer_avg_neg_rate is None:
         return 0.0
     return _clamp(neg_rate - peer_avg_neg_rate)
+
+
+def scaled_benchmark_gap(
+    target_negative_rate: float,
+    peer_negative_rate: float | None,
+    benchmark_scale: float,
+) -> float:
+    if peer_negative_rate is None or benchmark_scale <= 0:
+        return 0.0
+    return _clamp((target_negative_rate - peer_negative_rate) / benchmark_scale)
 
 
 def compute_priority_score(
@@ -85,7 +115,7 @@ def compute_priority_score(
         float(weight) * _clamp(component_scores.get(component_name, 0.0))
         for component_name, weight in weights.items()
     )
-    multiplier = _risk_multiplier(stats.aspect, scoring)
+    multiplier = risk_multiplier(stats.aspect, scoring)
     return round(_clamp(weighted_score * multiplier) * 100.0, 4)
 
 
@@ -96,7 +126,7 @@ def _schema_aspects(label_schema: dict[str, Any]) -> list[str]:
     return list(aspects)
 
 
-def _risk_multiplier(aspect: str, scoring: dict[str, Any]) -> float:
+def risk_multiplier(aspect: str, scoring: dict[str, Any]) -> float:
     default = float(scoring.get("defaults", {}).get("risk_multiplier_if_missing", 1.0))
     return float(scoring.get("risk_multiplier", {}).get(aspect, default))
 

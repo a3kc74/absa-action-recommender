@@ -1,170 +1,198 @@
 # Implementation Notes
 
-## 2026-06-01: ABSA schema normalization
+## 2026-06-02: Refactor to ABSA Aspect Priority Engine
 
-- Read `AGENTS.md` before coding, as requested.
-- The existing project had an early lightweight `models.py` shape using `text` and `aspects`; the requested production input shape is `review_text` plus `annotations[]`. I added the requested schemas in a new `schemas.py` module instead of deleting the older prototype models immediately.
-- `data/samples/absa_outputs.jsonl` is being moved to the actual ABSA format so local commands and schema tests exercise the format described in `AGENTS.md`.
-- Flattening uses deterministic extraction IDs with zero-based annotation indexes: `f"{review_id}_{annotation_index}"`. The prompt did not specify one-based or zero-based indexing; zero-based matches Python list indexing and keeps the implementation simple.
-- `flatten_reviews` receives a loaded label schema instead of reading config internally. This keeps the function deterministic and easier to test.
-- `severity` is set to `0.0` exactly as requested. Future severity scoring should replace this in one place during flattening or immediately after flattening.
-- Unknown restaurant IDs are filled with the `default_restaurant_id` argument. `restaurant_name`, `rating`, and `review_time` stay optional.
-- No internal field named `evidence` is used in the new schemas.
-- The CLI reconfigures `stdout` to UTF-8 when supported. This is needed on Windows shells that default to `cp1252`, otherwise Vietnamese sample text can raise `UnicodeEncodeError`.
+This refactor aligns the repository with `Goals.md`: the system is now an aspect priority scorer, not an aspect-to-action recommender.
 
-## 2026-06-01: Severity scoring
+### Removed surfaces
 
-- Read `AGENTS.md` before coding, as requested.
-- Replaced `configs/severity_lexicon.yaml` with valid UTF-8 Vietnamese patterns. The file previously contained mojibake text from pasted source material, which would prevent direct substring matching for Vietnamese test cases.
-- `compute_severity` is rule-based and deterministic. It uses configured `base_scores`, then raises severity for strong negative and safety patterns.
-- Mild negative handling is intentionally applied before strong/safety escalation: a negative opinion with a mild pattern and no strong pattern scores `0.6`; strong or safety indicators override that.
-- I removed `khó hiểu` from `mild_negative_patterns` because the requested severity tests treat `menu khó hiểu` under `Menu` as at least the default negative severity. This keeps unclear-menu complaints from being downgraded to mild by default.
-- `flatten_reviews` now computes severity from `opinion_expression` after label normalization, passing the normalized aspect into severity scoring.
-- `flatten_reviews` accepts an optional `severity_config` for tests or callers that want to avoid reading config from disk repeatedly. If omitted, it loads `configs/severity_lexicon.yaml` once per call.
+- Removed sub-problem detection modules:
+  - `subproblem.py`
+  - `subproblem_locator.py`
+  - `prototype_matcher.py`
+- Removed action recommendation:
+  - `actions.py`
+  - `configs/action_catalog.yaml`
+- Removed taxonomy mining/review flow:
+  - `taxonomy_miner.py`
+  - `taxonomy_review.py`
+  - `configs/taxonomy_miner.yaml`
+- Removed related config files:
+  - `configs/subproblem_rules.yaml`
+  - `configs/subproblem_prototypes.yaml`
+  - `configs/locator.yaml`
+- Removed the old prototype `models.py`, which still exposed `ActionRecommendation`.
+- Replaced old tests for action/sub-problem/taxonomy with tests for priority ranking, monitoring, storage, API, and CLI.
 
-## 2026-06-01: Aggregation layer
+### Schema changes
 
-- Read `AGENTS.md` before coding, as requested.
-- Added `AspectStats` to `schemas.py` because it is a Pydantic schema shared by aggregation callers and future API/CLI layers.
-- Implemented aggregation with plain Python grouping. The current logic is small, deterministic, and does not need Polars yet.
-- `aggregate_aspect_stats` accepts either the whole loaded `scoring.yaml` structure or its inner `scoring` object. This keeps tests and future callers flexible.
-- Missing ratings and model confidence values are replaced per extraction before averaging, using `scoring.defaults.rating_if_missing` and `scoring.confidence.default_missing_confidence`.
-- `window_start` and `window_end` were not fully specified. I set them to min/max non-null `review_time` within each restaurant/aspect group, and leave them `None` if the group has no review time.
+- Added `review_month` to `ABSAReview` and `AspectExtraction`.
+- `flatten_reviews` derives `review_month` from `review_time` when explicit `review_month` is absent.
+- `AspectStats` now includes monthly and component fields:
+  - `review_month`
+  - `negative_rate_raw`
+  - `negative_rate_smoothed`
+  - `mention_share`
+  - `rating_gap`
+- Replaced action recommendation response shape with:
+  - `PriorityResponse`
+  - `PriorityItem`
+  - `PeerSummary`
+  - `TrendSummary`
+- `PriorityItem` intentionally does not include `sub_problem_id`, `recommended_actions`, or `monitoring_kpis`.
 
-## 2026-06-01: Scoring engine
+Compatibility aliases `RecommendationResponse = PriorityResponse` and `RecommendationItem = PriorityItem` remain in `schemas.py` only to reduce incidental breakage in type imports. The public pipeline and docs use `PriorityResponse`/`PriorityItem`.
 
-- Read `AGENTS.md` before coding, as requested.
-- Added `AspectRecommendationCandidate` to `schemas.py` as the Pydantic schema for scored aspect-level candidates.
-- Implemented scoring components as small pure functions in `scoring.py`. Each component clamps its output to `[0, 1]`; `compute_priority_score` clamps the final weighted score before converting it to `[0, 100]`.
-- Formula choices not specified in the prompt:
-  - `log_mention_share = log1p(mention_count) / log1p(total_mentions)`.
-  - `normalized_rating_gap = (5 - avg_rating) / 4`, assuming the configured review rating scale is 1 to 5.
-  - `support_confidence = 1 - exp(-mention_count / tau)`.
-  - `combined_confidence = lambda_support * support_confidence + (1 - lambda_support) * model_confidence`.
-  - `benchmark_gap = max(0, neg_rate - peer_avg_neg_rate)`, and returns `0.0` when peer data is unavailable.
-- `compute_priority_score` only computes the numeric priority score. Candidate assembly is intentionally left to the recommender layer so sub-problem/action mapping can be added later without coupling it to score math.
-- Risk multipliers come from `scoring.risk_multiplier`; missing aspects use `scoring.defaults.risk_multiplier_if_missing`.
+### Priority ranking
 
-## 2026-06-01: Rule-first sub-problem detection
+- `generate_priority_ranking(...)` is the main pipeline function.
+- It accepts ABSA reviews or pre-flattened extractions.
+- It aggregates by `(restaurant_id, review_month, aspect)`.
+- It returns Top-N aspect items, sorted by `priority_score`.
+- It keeps `opinion_examples` sourced from `opinion_expression` through internal `opinion_text`.
+- Food Safety can still be forced into Top-3 at the aspect level when configured and above the negative-rate threshold.
 
-- Read `AGENTS.md` before coding, as requested.
-- Replaced `configs/subproblem_rules.yaml` with valid UTF-8 Vietnamese text. The existing file had mojibake from pasted source material, so rule matching against actual Vietnamese ABSA fields would fail.
-- `subproblem.py` only reads `aspect_expression_patterns` and `opinion_expression_patterns`; it does not use the disallowed `aspect_terms`, `opinion_patterns`, or `evidence_patterns` keys.
-- Rule matching only considers rules under the same normalized aspect.
-- I add `priority / 100` only after at least one aspect or opinion pattern matches. If priority were added to every rule unconditionally, generic fallback could never happen for any aspect that has configured rules.
-- `group_extractions_by_subproblem` returns a dictionary keyed by `(restaurant_id, aspect, sub_problem_id)` because the prompt did not prescribe a return shape. This keeps grouping usable for downstream restaurant/aspect recommendations.
-- `compute_subproblem_score` returns a `[0, 100]` score by multiplying the parent aspect priority score by a weighted blend of `group_share` and `avg_severity`: `(1 - beta) * group_share + beta * avg_severity`.
-- Generic fallback IDs slugify the aspect with underscores, for example `Food Quality` -> `generic_food_quality_issue`.
+Current local behavior:
 
-## 2026-06-01: TF-IDF prototype matcher
+- `benchmark_gap` is `0.0` unless peer benchmark data is supplied.
+- `trend_score` is `0.0` unless previous-month priority/stat data is supplied.
+- Missing peer support and missing history are exposed through `data_quality_flags`.
 
-- Read `AGENTS.md` before coding, as requested.
-- Replaced `configs/subproblem_prototypes.yaml` with valid UTF-8 Vietnamese text. The previous file had mojibake and would not match actual ABSA annotation text reliably.
-- Added `PrototypeMatch` to `schemas.py` to make prototype matcher returns stable and validated.
-- `prototype_matcher.py` compares only prototypes under the same aspect. If the aspect has no prototypes, it returns `sub_problem_id=None`, `similarity=0.0`, and no nearest examples.
-- Matching text follows the requested format exactly: `aspect_expression + " | " + opinion_expression`, normalized with the same `normalize_text` helper used by rule matching.
-- The matcher uses `TfidfVectorizer(analyzer="char_wb", ngram_range=(3, 5))`. Cosine similarity is the sparse dot product because scikit-learn normalizes TF-IDF vectors by default.
-- I added a close `muỗng` prototype and a close `món trên menu không còn bán` prototype so the requested tests are deterministic instead of relying on weak similarity to distant examples.
-- Prototype similarity is clamped to `[0, 1]` before schema validation because sparse floating-point dot products can produce tiny overshoots such as `1.0000000000000013`.
+### Scoring config
 
-## 2026-06-01: Sub-problem locator
+Updated `configs/scoring.yaml` to match the new design:
 
-- Read `AGENTS.md` before coding, as requested.
-- Added `SubProblemPrediction` to `schemas.py`. The output uses `aspect_expression` and `opinion_expression` for user-facing prediction records and does not expose any `evidence` field.
-- `locate_subproblem` combines rule score, prototype similarity, severity, and model confidence using `configs/locator.yaml`.
-- Rule score normalization uses `thresholds.rule_auto_assign`: `normalized_rule_score = min(rule_score / rule_auto_assign, 1.0)`.
-- Prototype similarity is used directly because TF-IDF cosine similarity is already in `[0, 1]`.
-- Missing `model_confidence` is treated as `0.0` in the locator because `locator.yaml` does not define a default. Upstream aggregation/scoring still uses the scoring config default for aggregate confidence.
-- The predicted sub-problem ID is chosen from the stronger of normalized rule score and prototype similarity before threshold decisions. If the final locator score is below `thresholds.needs_review`, the prediction is forced to the generic aspect issue.
-- High-risk aspects listed in `locator.yaml` use `thresholds.high_risk_auto_assign` for automatic assignment; other aspects use `thresholds.auto_assign`.
+- weights:
+  - `negative_rate: 0.25`
+  - `sentiment_severity: 0.18`
+  - `mention_share: 0.12`
+  - `rating_gap: 0.12`
+  - `trend_score: 0.16`
+  - `benchmark_gap: 0.17`
+- confidence blend:
+  - support/model/peer/history weights
+  - `peer_support_tau`
+- new `trend`, `benchmark`, and `ranking` sections.
 
-## 2026-06-01: Action catalog mapping
+### Added config scaffolds
 
-- Read `AGENTS.md` before coding, as requested.
-- Replaced `configs/action_catalog.yaml` with valid UTF-8 Vietnamese action text and added generic fallback entries for all 8 official aspects plus `Unknown`.
-- Added catalog-facing `ActionRecommendation` to `schemas.py`. The older prototype `models.py` still has a separate `ActionRecommendation` used by the early recommender smoke test; I left that untouched to avoid broad unrelated refactoring.
-- `actions.py` lookup only uses `aspect` and `sub_problem_id`. It deliberately does not accept or read `aspect_expression`, `opinion_expression`, or any evidence-like field.
-- Fallback order is exact `aspect + sub_problem_id`, then the generic action under the same aspect, then `Unknown.generic_unknown_issue` when the aspect itself is absent.
+Added local-first config files for the future monthly pipeline:
 
-## 2026-06-01: End-to-end recommendation generation
+- `configs/crawler.yaml`
+- `configs/peer_discovery.yaml`
+- `configs/scheduler.yaml`
+- `configs/absa_model.yaml`
+- `configs/dashboard.yaml`
+- `configs/source_policy.yaml`
 
-- Read `AGENTS.md` before coding, as requested.
-- Replaced the early prototype `recommender.py` with the actual pipeline over `ABSAReview` and `AspectExtraction`. The old `models.py` remains in the repo for now, but the main recommender path no longer depends on it.
-- Restored `data/samples/absa_outputs.jsonl` to valid UTF-8 Vietnamese text so rule/prototype matching can work end to end.
-- `generate_recommendations` accepts either reviews or pre-flattened extractions. Empty input returns an empty response.
-- The response schema is singular by requirement. For inputs spanning multiple restaurants, `restaurant_id` is set to `"multiple"`; for one restaurant it uses that restaurant ID.
-- Aspect-level priority is computed first, then negative extractions for that restaurant/aspect are located to sub-problems. The top sub-problem per aspect is selected using `compute_subproblem_score`.
-- `priority_score` on `RecommendationItem` is the selected sub-problem score, not the raw parent aspect score. Parent component scores remain attached for auditability.
-- `opinion_examples` are taken from `AspectExtraction.opinion_text`, which came from `opinion_expression`.
-- The Food Safety Top-3 rule is implemented conservatively: if a Food Safety recommendation exists and `top_n >= 3`, it is moved into rank 3 when it would otherwise rank lower.
+These are scaffolds only. The repository still avoids implementing a Google Maps scraper. Source adapters should respect license/terms restrictions and source-specific retention policy.
 
-## 2026-06-01: Taxonomy mining
+### Monthly pipeline helper modules
 
-- Read `AGENTS.md` before coding, as requested.
-- Added `phrase_miner.py`, `taxonomy_miner.py`, and `taxonomy_review.py` as local-only utilities. They generate review artifacts and do not mutate production configs.
-- The miner consumes locator prediction JSONL as dictionaries so it can tolerate future fields. It expects the requested ABSA field names: `aspect_expression`, `opinion_expression`, and `aspect_category`.
-- `SubProblemPrediction` does not currently include `severity`, but taxonomy reports need `avg_severity`. The miner reads optional `severity` if present and otherwise defaults missing severity to `0.0`.
-- Candidate selection includes negative annotations that are generic, weak by locator score, marked `needs_review`, or high-risk and below the high-risk threshold.
-- Clustering uses `TfidfVectorizer(analyzer="char_wb")` with the configured char n-gram range and `AgglomerativeClustering(metric="cosine", linkage="average")`.
-- For one candidate in an aspect, the miner emits a single cluster without fitting a clustering model.
-- `taxonomy_review.py` is intentionally small: it loads/saves reports and marks human review decisions. It does not apply accepted suggestions to config files.
+Added deterministic local modules requested by `Goals.md`:
 
-## 2026-06-01: Typer CLI
+- `review_normalizer.py` normalizes source review dictionaries and creates text hashes.
+- `dedup.py` deduplicates by `source_review_id` first, then source place/text/rating/time keys.
+- `peer_discovery.py` filters active nearby peer restaurants without including the target.
+- `absa_inference.py` defines an adapter protocol and explicit not-configured exception.
+- `benchmark.py` computes peer aspect monthly summaries.
+- `trend.py` computes current-vs-previous month trend score and flags insufficient history.
+- `ranking.py` ranks `PriorityItem` records and applies the Food Safety Top-3 rule at aspect level.
+- `scheduler.py` provides previous-month and priority idempotency helpers.
+- `crawler/monthly.py` creates local crawl run records.
+- `sources/google_maps_adapter.py` is a non-scraping placeholder that raises unless a compliant source is explicitly enabled.
 
-- Read `AGENTS.md` before coding, as requested.
-- Replaced the initial single-command CLI with explicit commands: `validate`, `recommend`, `inspect-subproblems`, `locate-subproblems`, `mine-taxonomy`, `apply-taxonomy-suggestions`, and `show-labels`.
-- `recommend --restaurant-id` overrides `restaurant_id` on all loaded reviews for that command. The prompt usage implies a single target restaurant output even when the sample file contains multiple restaurant IDs.
-- `locate-subproblems` adds `severity` to each JSONL prediction payload because taxonomy mining can use it when available, while `SubProblemPrediction` itself stays aligned with the requested locator schema.
-- `apply-taxonomy-suggestions` accepts review decisions `approved`, `accept`, or `accepted` and writes only to the requested output path. It never overwrites the original rules file directly.
+### API
 
-## 2026-06-01: FastAPI API
+FastAPI is now titled `ABSA Aspect Priority Engine`.
 
-- Read `AGENTS.md` before coding, as requested.
-- Replaced the earlier minimal API with versioned `/api/v1/*` routes while preserving `GET /health`.
-- API routes call the same core functions as the CLI: recommendation generation, label loading, flattening, sub-problem location, and taxonomy mining.
-- `POST /api/v1/subproblems/locate` returns `SubProblemPrediction` objects using `aspect_expression` and `opinion_expression`; it does not expose an `evidence` field.
-- `POST /api/v1/taxonomy/mine` returns the report in memory and does not write or mutate config files.
-- Feedback is accepted and echoed without persistence for now, as requested.
-- API tests call route functions directly because the installed Starlette test client requires an extra `httpx2` dependency that is not otherwise needed by the project. This keeps the dependency list unchanged.
+Implemented routes:
 
-## 2026-06-02: Streamlit dashboard
+- `GET /health`
+- `GET /api/v1/labels`
+- `POST /api/v1/priority/run`
+- `POST /api/v1/monthly/run`
+- `POST /api/v1/absa/infer`
+- `POST /api/v1/crawl/run`
+- `GET /api/v1/restaurants/{restaurant_id}/priority`
+- `GET /api/v1/restaurants/{restaurant_id}/dashboard`
+- `GET /api/v1/restaurants/{restaurant_id}/history`
+- `GET /api/v1/restaurants/{restaurant_id}/aspects/{aspect}/history`
+- `GET /api/v1/restaurants/{restaurant_id}/peer-benchmark`
 
-- Read `AGENTS.md` before coding, as requested.
-- Replaced the earlier sample-only Streamlit viewer with a local workflow dashboard for upload, recommendations, locator inspection, and taxonomy gap review.
-- The app defaults to `data/samples/absa_outputs.jsonl` when no file is uploaded so it remains immediately usable.
-- The default `restaurant_id` text input is passed through to flattening/recommendation generation for records missing `restaurant_id`; it does not overwrite existing restaurant IDs.
-- The Taxonomy Gaps tab mines from in-memory locator predictions and exposes a YAML download. It does not write files or mutate configs.
-- I avoided importing pandas directly in the app because it is not a declared project dependency; Streamlit renders list-of-dict dataframes directly.
+The crawler/inference/history routes return structured placeholders until a source adapter and persisted dashboard read layer are implemented.
 
-## 2026-06-02: DuckDB storage
+Removed API routes:
 
-- Read `AGENTS.md` before coding, as requested.
-- Added `storage.py` as a lightweight local persistence layer using the existing `duckdb` dependency.
-- IDs are generated with UUID4 prefixes (`run_`, `pred_`, `report_`, `feedback_`) except recommendation item IDs, which use `run_id_rank_<rank>` for stable item references within a run.
-- `save_recommendation_run` persists the run and then saves recommendation items in the same public call. `save_recommendation_items` remains available for explicit item persistence if needed.
-- JSON-heavy fields are stored as UTF-8 JSON strings. `get_run` returns both `output_json` and parsed `output` for convenience.
-- The storage layer does not enforce foreign keys. This keeps the schema simple and local-first; tests verify the expected inserts and lookups.
+- `POST /api/v1/subproblems/locate`
+- `POST /api/v1/taxonomy/mine`
+- `POST /api/v1/recommendations/{recommendation_id}/feedback`
 
-## 2026-06-02: Evaluation utilities
+### CLI
 
-- Read `AGENTS.md` before coding, as requested.
-- Added `evaluation.py` with lightweight ranking metrics and coverage helpers. The functions are pure and do not depend on any storage or service layer.
-- `recommendation_coverage`, `subproblem_coverage`, and `action_coverage` return simple summary rates/counts intended for smoke evaluation rather than formal offline experiments.
-- `stability_score` is implemented as overlap@k because the prompt named it `stability overlap@k`.
-- Added `data/gold.json` in the requested gold format for local CLI evaluation examples.
-- Added `absa-rec evaluate`, which reads recommendation JSON plus a gold JSON file and prints precision@k, recall@k, and nDCG@k.
+The preferred CLI script is now `absa-priority`. `absa-rec` remains as a compatibility alias.
 
-## 2026-06-02: Monitoring
+Implemented commands:
 
-- Added `monitoring.py` as a lightweight metrics layer over recommendation responses and sub-problem locator predictions.
-- Monitoring reuses evaluation helpers where possible and adds locator-specific metrics: average locator score, generic/weak rates by aspect, high-risk unreviewed counts, and top unmatched opinion phrases.
-- `food_safety_unreviewed_count` and `cleanliness_unreviewed_count` count weak, generic, or explicitly `needs_review` predictions for their aspect unless the row has `reviewed=true`.
-- Suggested alerts are returned as data dictionaries instead of raising exceptions or sending notifications. This keeps the module local-first and UI/API-friendly.
-- The suggested alert thresholds follow the phase prompt: overall generic rate over 25%, Menu generic rate over 35%, any Food Safety weak/generic item, and Cleanliness count above a configurable threshold.
+- `validate`
+- `score-priority`
+- `run-monthly`
+- `compute-stats`
+- `discover-peers`
+- `crawl-month`
+- `infer-absa`
+- `backfill`
+- `show-labels`
 
-## 2026-06-02: Docker deployment
+Source/crawler/inference commands are explicit placeholders, not fake crawlers.
 
-- Added a lightweight `Dockerfile` based on `python:3.12-slim`, with `uv` installed via `pip`.
-- The Docker build copies `pyproject.toml` and optional `uv.lock` first, runs `uv sync --frozen`, then copies `src`, `configs`, `app`, and `README.md`.
-- Added `docker-compose.yml` with separate `api` and `streamlit` services sharing the same image build. Both mount `./data` and `./configs` so local files remain editable.
-- Added `.dockerignore` to keep local virtualenvs, caches, output files, and DuckDB files out of the build context.
+### Streamlit
+
+Replaced the old recommendation/sub-problem/taxonomy dashboard with aspect-priority tabs:
+
+- Monthly Overview
+- Top-N Aspects
+- Aspect Detail
+- Peer Benchmark
+- History
+- Data Quality
+
+The dashboard renders component scores, peer/trend fields, opinion examples, and data quality flags.
+
+### DuckDB
+
+Replaced old recommendation/sub-problem/action storage tables with the proposed monthly-priority schema:
+
+- `restaurants`
+- `crawl_runs`
+- `reviews`
+- `absa_annotations`
+- `aspect_monthly_stats`
+- `peer_aspect_monthly_stats`
+- `priority_runs`
+- `priority_items`
+
+Implemented helpers:
+
+- `init_db`
+- `save_priority_run`
+- `save_priority_items`
+- `list_priority_runs`
+- `get_priority_run`
+
+### Monitoring
+
+Replaced locator/action monitoring with data, ABSA, and scoring health metrics:
+
+- `crawl_success_rate`
+- `reviews_fetched_count`
+- `new_review_count`
+- `duplicate_rate`
+- `missing_review_time_rate`
+- `absa_inference_failure_rate`
+- `low_confidence_annotation_rate`
+- `aspect_coverage`
+- `peer_support_rate`
+- `dashboard_data_freshness`
+
+Alerts are data dictionaries for local dashboard/API use.

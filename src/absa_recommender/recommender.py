@@ -1,55 +1,49 @@
-from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from absa_recommender.actions import get_actions, load_action_catalog
 from absa_recommender.aggregation import aggregate_aspect_stats
 from absa_recommender.config import load_label_schema, load_yaml
 from absa_recommender.normalize_absa import flatten_reviews
-from absa_recommender.prototype_matcher import load_subproblem_prototypes
+from absa_recommender.ranking import rank_priority_items
 from absa_recommender.schemas import (
     ABSAReview,
     AspectExtraction,
-    AspectRecommendationCandidate,
     AspectStats,
-    RecommendationItem,
-    RecommendationResponse,
-    SubProblemPrediction,
+    PeerSummary,
+    PriorityItem,
+    PriorityResponse,
+    TrendSummary,
 )
 from absa_recommender.scoring import (
-    benchmark_gap,
-    combined_confidence,
     compute_global_negative_rate_by_aspect,
     compute_priority_score,
-    log_mention_share,
     model_confidence,
-    normalized_rating_gap,
+    priority_confidence,
+    risk_multiplier,
+    scaled_benchmark_gap,
     smoothed_negative_rate,
     support_confidence,
 )
 from absa_recommender.severity import load_severity_config
-from absa_recommender.subproblem import compute_subproblem_score, load_subproblem_rules
-from absa_recommender.subproblem_locator import locate_subproblem
 
 
 DEFAULT_CONFIG_PATHS = {
     "label_schema": Path("configs/label_schema.yaml"),
     "scoring": Path("configs/scoring.yaml"),
     "severity": Path("configs/severity_lexicon.yaml"),
-    "subproblem_rules": Path("configs/subproblem_rules.yaml"),
-    "subproblem_prototypes": Path("configs/subproblem_prototypes.yaml"),
-    "locator": Path("configs/locator.yaml"),
-    "action_catalog": Path("configs/action_catalog.yaml"),
 }
 
 
-def generate_recommendations(
+def generate_priority_ranking(
     reviews_or_extractions: list[ABSAReview] | list[AspectExtraction],
     top_n: int = 5,
     config_paths: dict[str, str | Path] | None = None,
     default_restaurant_id: str = "unknown",
-) -> RecommendationResponse:
+    review_month: str | None = None,
+    peer_benchmarks: dict[tuple[str, str, str], dict[str, Any]] | None = None,
+    previous_priority: dict[tuple[str, str], dict[str, Any]] | None = None,
+) -> PriorityResponse:
     configs = _load_configs(config_paths)
     extractions = _ensure_extractions(
         reviews_or_extractions,
@@ -57,12 +51,20 @@ def generate_recommendations(
         configs["severity"],
         default_restaurant_id,
     )
+    target_month = review_month or _response_review_month(extractions)
+    if target_month != "multiple":
+        extractions = [item for item in extractions if item.review_month == target_month]
+
     restaurant_id = _response_restaurant_id(extractions, default_restaurant_id)
+    restaurant_name = _response_restaurant_name(extractions)
     if not extractions:
-        return RecommendationResponse(
+        return PriorityResponse(
             restaurant_id=restaurant_id,
+            restaurant_name=restaurant_name,
+            review_month=target_month,
             generated_at=_now(),
-            recommendations=[],
+            top_n=top_n,
+            items=[],
         )
 
     stats = aggregate_aspect_stats(extractions, configs["scoring"])
@@ -70,28 +72,35 @@ def generate_recommendations(
         extractions,
         configs["label_schema"],
     )
-    candidates = [
-        _build_candidate(stat, global_negative_rates, configs["scoring"])
+    items = [
+        _build_priority_item(
+            stat,
+            extractions,
+            global_negative_rates,
+            configs["scoring"],
+            peer_benchmarks or {},
+            previous_priority or {},
+        )
         for stat in stats
         if stat.negative_count > 0
     ]
-    negative_extractions = [item for item in extractions if item.sentiment == "negative"]
-    recommendations = [
-        _recommend_for_candidate(candidate, negative_extractions, configs)
-        for candidate in candidates
-    ]
-    recommendations = [item for item in recommendations if item is not None]
-    recommendations = _apply_food_safety_top3(recommendations, configs["scoring"], top_n)
-    recommendations = recommendations[:top_n]
-
-    ranked = [
-        item.model_copy(update={"rank": rank})
-        for rank, item in enumerate(recommendations, start=1)
-    ]
-    return RecommendationResponse(
+    scoring = configs["scoring"].get("scoring", configs["scoring"])
+    ranking = scoring.get("ranking", {})
+    ranked = rank_priority_items(
+        items,
+        top_n,
+        force_food_safety_top3=bool(ranking.get("force_food_safety_top3", True)),
+        food_safety_negative_threshold=float(
+            ranking.get("food_safety_negative_threshold", 0.10)
+        ),
+    )
+    return PriorityResponse(
         restaurant_id=restaurant_id,
+        restaurant_name=restaurant_name,
+        review_month=target_month,
         generated_at=_now(),
-        recommendations=ranked,
+        top_n=top_n,
+        items=ranked,
     )
 
 
@@ -101,10 +110,6 @@ def _load_configs(config_paths: dict[str, str | Path] | None) -> dict[str, Any]:
         "label_schema": load_label_schema(paths["label_schema"]),
         "scoring": load_yaml(paths["scoring"]),
         "severity": load_severity_config(paths["severity"]),
-        "subproblem_rules": load_subproblem_rules(paths["subproblem_rules"]),
-        "subproblem_prototypes": load_subproblem_prototypes(paths["subproblem_prototypes"]),
-        "locator": load_yaml(paths["locator"]),
-        "action_catalog": load_action_catalog(paths["action_catalog"]),
     }
 
 
@@ -127,152 +132,168 @@ def _ensure_extractions(
     )
 
 
-def _build_candidate(
+def _build_priority_item(
     stats: AspectStats,
+    extractions: list[AspectExtraction],
     global_negative_rates: dict[str, float],
     scoring_config: dict[str, Any],
-) -> AspectRecommendationCandidate:
+    peer_benchmarks: dict[tuple[str, str, str], dict[str, Any]],
+    previous_priority: dict[tuple[str, str], dict[str, Any]],
+) -> PriorityItem:
     scoring = scoring_config.get("scoring", scoring_config)
     alpha = float(scoring.get("smoothing", {}).get("alpha", 10))
-    tau = float(scoring.get("confidence", {}).get("support_threshold_tau", 30))
-    lambda_support = float(scoring.get("confidence", {}).get("lambda_support", 0.7))
     neg_rate = smoothed_negative_rate(
         stats.negative_count,
         stats.mention_count,
         global_negative_rates.get(stats.aspect, 0.0),
         alpha,
     )
-    support_conf = support_confidence(stats.mention_count, tau)
-    model_conf = model_confidence(stats.avg_confidence)
-    confidence = combined_confidence(support_conf, model_conf, lambda_support)
+    stat = stats.model_copy(update={"negative_rate_smoothed": neg_rate})
+    peer_summary, peer_confidence, benchmark = _peer_summary(stat, scoring, peer_benchmarks)
+    trend_summary, history_confidence, trend_score = _trend_summary(stat, scoring, previous_priority)
     component_scores = {
         "negative_rate": neg_rate,
-        "sentiment_severity": stats.avg_severity,
-        "mention_share": log_mention_share(
-            stats.mention_count,
-            stats.total_mentions_for_restaurant,
-        ),
-        "rating_gap": normalized_rating_gap(stats.avg_rating),
-        "trend_score": _trend_score(stats, scoring),
-        "benchmark_gap": benchmark_gap(neg_rate, None),
+        "sentiment_severity": stat.avg_severity,
+        "mention_share": stat.mention_share,
+        "rating_gap": stat.rating_gap,
+        "trend_score": trend_score,
+        "benchmark_gap": benchmark,
     }
-    return AspectRecommendationCandidate(
-        restaurant_id=stats.restaurant_id,
-        aspect=stats.aspect,
-        priority_score=compute_priority_score(stats, component_scores, scoring_config),
-        confidence=confidence,
-        severity=stats.avg_severity,
-        mention_count=stats.mention_count,
-        negative_count=stats.negative_count,
-        component_scores=component_scores,
-    )
-
-
-def _recommend_for_candidate(
-    candidate: AspectRecommendationCandidate,
-    negative_extractions: list[AspectExtraction],
-    configs: dict[str, Any],
-) -> RecommendationItem | None:
-    aspect_extractions = [
-        item
-        for item in negative_extractions
-        if item.restaurant_id == candidate.restaurant_id and item.aspect == candidate.aspect
-    ]
-    if not aspect_extractions:
-        return None
-
-    predictions = [
-        locate_subproblem(
-            extraction,
-            configs["subproblem_rules"],
-            configs["subproblem_prototypes"],
-            configs["locator"],
+    priority_score = compute_priority_score(stat, component_scores, scoring_config)
+    if trend_summary.previous_month_priority_score is not None:
+        trend_summary = trend_summary.model_copy(
+            update={
+                "priority_delta": priority_score - trend_summary.previous_month_priority_score,
+            }
         )
-        for extraction in aspect_extractions
-    ]
-    prediction_groups: dict[str, list[tuple[AspectExtraction, SubProblemPrediction]]] = defaultdict(list)
-    for extraction, prediction in zip(aspect_extractions, predictions, strict=True):
-        prediction_groups[prediction.predicted_sub_problem_id].append((extraction, prediction))
-
-    subproblem_id, group = _top_subproblem_group(prediction_groups, candidate.priority_score)
-    group_extractions = [item[0] for item in group]
-    group_predictions = [item[1] for item in group]
-    group_share = len(group) / len(aspect_extractions)
-    severity = _mean([item.severity for item in group_extractions])
-    priority_score = compute_subproblem_score(
-        candidate.priority_score,
-        group_share,
-        severity,
+    confidence = priority_confidence(
+        support_confidence(stat.mention_count, float(scoring.get("confidence", {}).get("support_threshold_tau", 30))),
+        model_confidence(stat.avg_confidence),
+        peer_confidence,
+        history_confidence,
+        scoring_config,
     )
-    representative_prediction = group_predictions[0]
-    action_recommendation = get_actions(
-        candidate.aspect,
-        subproblem_id,
-        configs["action_catalog"],
-    )
-
-    return RecommendationItem(
+    flags = _data_quality_flags(stat, scoring, peer_summary, trend_summary)
+    return PriorityItem(
         rank=0,
-        aspect=candidate.aspect,
-        sub_problem_id=subproblem_id,
-        sub_problem_label=representative_prediction.sub_problem_label,
+        aspect=stat.aspect,
         priority_score=priority_score,
-        confidence=candidate.confidence,
-        severity=severity,
-        mention_count=len(group_extractions),
-        negative_count=len(group_extractions),
-        opinion_examples=_opinion_examples(group_extractions),
-        recommended_actions=action_recommendation.actions,
-        monitoring_kpis=action_recommendation.kpis,
-        component_scores=candidate.component_scores,
-        locator_summary=dict(Counter(item.match_type for item in group_predictions)),
-    )
-
-
-def _top_subproblem_group(
-    groups: dict[str, list[tuple[AspectExtraction, SubProblemPrediction]]],
-    parent_priority_score: float,
-) -> tuple[str, list[tuple[AspectExtraction, SubProblemPrediction]]]:
-    return max(
-        groups.items(),
-        key=lambda item: (
-            compute_subproblem_score(
-                parent_priority_score,
-                len(item[1]) / sum(len(group) for group in groups.values()),
-                _mean([pair[0].severity for pair in item[1]]),
-            ),
-            len(item[1]),
+        priority_confidence=confidence,
+        severity=stat.avg_severity,
+        mention_count=stat.mention_count,
+        negative_count=stat.negative_count,
+        negative_rate_smoothed=neg_rate,
+        mention_share=stat.mention_share,
+        rating_gap=stat.rating_gap,
+        trend_score=trend_score,
+        benchmark_gap=benchmark,
+        risk_multiplier=risk_multiplier(stat.aspect, scoring),
+        opinion_examples=_opinion_examples(
+            [
+                item
+                for item in extractions
+                if item.restaurant_id == stat.restaurant_id
+                and item.review_month == stat.review_month
+                and item.aspect == stat.aspect
+                and item.sentiment == "negative"
+            ]
         ),
+        component_scores=component_scores,
+        peer_summary=peer_summary,
+        trend_summary=trend_summary,
+        data_quality_flags=flags,
     )
 
 
-def _apply_food_safety_top3(
-    recommendations: list[RecommendationItem],
-    scoring_config: dict[str, Any],
-    top_n: int,
-) -> list[RecommendationItem]:
-    sorted_items = sorted(recommendations, key=lambda item: item.priority_score, reverse=True)
-    scoring = scoring_config.get("scoring", scoring_config)
-    safety_rules = scoring.get("safety_rules", {})
-    if not safety_rules.get("force_food_safety_top3", False) or top_n < 3:
-        return sorted_items
-
-    food_safety_index = next(
-        (index for index, item in enumerate(sorted_items) if item.aspect == "Food Safety"),
-        None,
+def _peer_summary(
+    stats: AspectStats,
+    scoring: dict[str, Any],
+    peer_benchmarks: dict[tuple[str, str, str], dict[str, Any]],
+) -> tuple[PeerSummary, float, float]:
+    benchmark_config = scoring.get("benchmark", {})
+    minimum_peers = int(benchmark_config.get("min_peer_restaurants", 5))
+    minimum_mentions = int(benchmark_config.get("min_peer_mentions_per_aspect", 20))
+    scale = float(benchmark_config.get("benchmark_scale", 0.30))
+    peer = peer_benchmarks.get((stats.restaurant_id, stats.review_month, stats.aspect), {})
+    peer_count = int(peer.get("peer_restaurant_count", 0))
+    peer_mentions = int(peer.get("peer_total_mentions", 0))
+    peer_rate = peer.get("peer_negative_rate")
+    has_support = peer_count >= minimum_peers and peer_mentions >= minimum_mentions
+    benchmark = scaled_benchmark_gap(
+        stats.negative_rate_smoothed,
+        float(peer_rate) if peer_rate is not None and has_support else None,
+        scale,
     )
-    if food_safety_index is None or food_safety_index < 3:
-        return sorted_items
+    peer_conf = min(1.0, peer_mentions / float(scoring.get("confidence", {}).get("peer_support_tau", 100)))
+    return (
+        PeerSummary(
+            peer_restaurant_count=peer_count,
+            peer_negative_rate=float(peer_rate or 0.0),
+            target_vs_peer_gap=benchmark,
+            peer_support_flag=None if has_support else "low_peer_support",
+        ),
+        peer_conf if has_support else 0.0,
+        benchmark,
+    )
 
-    food_safety_item = sorted_items.pop(food_safety_index)
-    sorted_items.insert(2, food_safety_item)
-    return sorted_items
+
+def _trend_summary(
+    stats: AspectStats,
+    scoring: dict[str, Any],
+    previous_priority: dict[tuple[str, str], dict[str, Any]],
+) -> tuple[TrendSummary, float, float]:
+    trend_config = scoring.get("trend", {})
+    previous = previous_priority.get((stats.restaurant_id, stats.aspect), {})
+    min_current = int(trend_config.get("min_mentions_current", 5))
+    min_previous = int(trend_config.get("min_mentions_previous", 5))
+    previous_mentions = int(previous.get("mention_count", 0))
+    has_history = stats.mention_count >= min_current and previous_mentions >= min_previous
+    if not has_history:
+        return TrendSummary(trend_flag="insufficient_history"), 0.0, 0.0
+
+    previous_negative_rate = float(previous.get("negative_rate_smoothed", 0.0))
+    previous_severity = float(previous.get("severity", previous.get("avg_severity", 0.0)))
+    negative_delta = stats.negative_rate_smoothed - previous_negative_rate
+    severity_delta = stats.avg_severity - previous_severity
+    negative_trend = max(
+        0.0,
+        min(1.0, negative_delta / float(trend_config.get("negative_scale", 0.25))),
+    )
+    severity_trend = max(
+        0.0,
+        min(1.0, severity_delta / float(trend_config.get("severity_scale", 0.30))),
+    )
+    trend_score = 0.7 * negative_trend + 0.3 * severity_trend
+    previous_score = previous.get("priority_score")
+    return (
+        TrendSummary(
+            previous_month_priority_score=float(previous_score) if previous_score is not None else None,
+            priority_delta=None,
+            negative_rate_delta=negative_delta,
+        ),
+        1.0,
+        trend_score,
+    )
 
 
-def _trend_score(stats: AspectStats, scoring: dict[str, Any]) -> float:
+def _data_quality_flags(
+    stats: AspectStats,
+    scoring: dict[str, Any],
+    peer_summary: PeerSummary,
+    trend_summary: TrendSummary,
+) -> list[str]:
+    flags: list[str] = []
+    if stats.mention_count < int(scoring.get("trend", {}).get("min_mentions_current", 5)):
+        flags.append("low_mentions")
+    if peer_summary.peer_support_flag:
+        flags.append(peer_summary.peer_support_flag)
+    if trend_summary.trend_flag:
+        flags.append(trend_summary.trend_flag)
+    if stats.avg_confidence < 0.5:
+        flags.append("low_model_confidence")
     if stats.window_start is None or stats.window_end is None:
-        return float(scoring.get("defaults", {}).get("trend_if_missing", 0.0))
-    return 0.0
+        flags.append("missing_review_time")
+    return flags
 
 
 def _opinion_examples(extractions: list[AspectExtraction], limit: int = 3) -> list[str]:
@@ -297,10 +318,20 @@ def _response_restaurant_id(
     return "multiple"
 
 
-def _mean(values: list[float]) -> float:
-    if not values:
-        return 0.0
-    return sum(values) / len(values)
+def _response_restaurant_name(extractions: list[AspectExtraction]) -> str | None:
+    names = sorted({item.restaurant_name for item in extractions if item.restaurant_name})
+    if len(names) == 1:
+        return names[0]
+    return None
+
+
+def _response_review_month(extractions: list[AspectExtraction]) -> str:
+    months = sorted({item.review_month for item in extractions})
+    if not months:
+        return "unknown"
+    if len(months) == 1:
+        return months[0]
+    return "multiple"
 
 
 def _now() -> datetime:

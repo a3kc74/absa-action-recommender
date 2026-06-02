@@ -56,6 +56,15 @@ def flatten_reviews(
                     review_text=review.review_text,
                     rating=review.rating,
                     review_time=review.review_time,
+                    review_month=_review_month(review),
                 )
             )
     return extractions
+
+
+def _review_month(review: ABSAReview) -> str:
+    if review.review_month:
+        return review.review_month
+    if review.review_time is None:
+        return "unknown"
+    return review.review_time.strftime("%Y-%m")

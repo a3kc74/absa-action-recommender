@@ -1,7 +1,7 @@
 [project]
-name = "absa-action-recommender"
+name = "absa-aspect-priority-engine"
 version = "0.1.0"
-description = "Local-first Aspect-to-Action Recommender for Vietnamese restaurant ABSA outputs."
+description = "Local-first ABSA Aspect Priority Engine for Vietnamese restaurant reviews."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -17,6 +17,7 @@ dependencies = [
 ]
 
 [project.scripts]
+absa-priority = "absa_recommender.cli:app"
 absa-rec = "absa_recommender.cli:app"
 
 [dependency-groups]

@@ -1,0 +1,512 @@
+% !TEX program = xelatex
+\documentclass[12pt,a4paper]{article}
+
+\usepackage[a4paper,margin=2.4cm]{geometry}
+\usepackage{fontspec}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{tabularx}
+\usepackage{array}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{titlesec}
+\usepackage{fancyhdr}
+\usepackage{listings}
+
+\setmainfont{Times New Roman}
+\setsansfont{Arial}
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue!50!black,
+  urlcolor=blue!50!black,
+  citecolor=blue!50!black
+}
+
+\DeclareRobustCommand{\code}[1]{\texttt{\detokenize{#1}}}
+\newcolumntype{Y}{>{\raggedright\arraybackslash}X}
+\setlist[itemize]{leftmargin=1.4em}
+\setlist[enumerate]{leftmargin=1.6em}
+\titleformat{\section}{\Large\bfseries}{\thesection}{0.6em}{}
+\titleformat{\subsection}{\large\bfseries}{\thesubsection}{0.6em}{}
+\pagestyle{fancy}
+\fancyhf{}
+\lhead{ABSA Aspect Priority Engine}
+\rhead{Technical Report}
+\cfoot{\thepage}
+
+\lstset{
+  basicstyle=\small\ttfamily,
+  breaklines=true,
+  columns=fullflexible,
+  frame=single,
+  rulecolor=\color{black!20},
+  backgroundcolor=\color{black!3}
+}
+
+\title{\textbf{Báo cáo kỹ thuật hệ thống\\ABSA Aspect Priority Engine\\cho đánh giá nhà hàng Việt Nam}}
+\author{Dự án: \code{absa-aspect-priority-engine}}
+\date{Phiên bản báo cáo: 02/06/2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Tài liệu này mô tả trạng thái hiện tại của hệ thống \code{absa-aspect-priority-engine}. Hệ thống nhận dữ liệu ABSA JSONL của review nhà hàng Việt Nam, chuẩn hóa annotation, tính severity, aggregate theo tháng, tính điểm ưu tiên theo aspect và trả về Top-N aspect cần cải thiện. Hệ thống hiện tại không còn phát hiện sub-problem, không còn action catalog, không còn khuyến nghị hành động, không còn taxonomy mining và không còn feedback endpoint cho action. Thiết kế vẫn local-first, dùng Python, Pydantic, Typer, FastAPI, Streamlit và DuckDB.
+\end{abstract}
+
+\tableofcontents
+\newpage
+
+\section{Tổng quan hệ thống}
+
+\subsection{Mục tiêu}
+Mục tiêu hiện tại là xếp hạng các aspect cần cải thiện cho một nhà hàng trong một tháng cụ thể. Output không phải là ``hành động khuyến nghị'', mà là danh sách aspect có \code{priority_score}, \code{priority_confidence}, các component score, thông tin peer benchmark, thông tin trend và cờ chất lượng dữ liệu.
+
+Một item đầu ra gồm:
+\begin{itemize}
+  \item \code{rank};
+  \item \code{aspect};
+  \item \code{priority_score} trong $[0,100]$;
+  \item \code{priority_confidence} trong $[0,1]$;
+  \item \code{severity}, \code{mention_count}, \code{negative_count};
+  \item \code{negative_rate_smoothed}, \code{mention_share}, \code{rating_gap};
+  \item \code{trend_score}, \code{benchmark_gap}, \code{risk_multiplier};
+  \item \code{component_scores};
+  \item \code{peer_summary}, \code{trend_summary};
+  \item \code{opinion_examples};
+  \item \code{data_quality_flags}.
+\end{itemize}
+
+Các field cũ \code{sub_problem_id}, \code{recommended_actions} và \code{monitoring_kpis} đã bị loại bỏ khỏi schema chính.
+
+\subsection{Stack kỹ thuật}
+\begin{longtable}{p{0.28\linewidth}p{0.62\linewidth}}
+\toprule
+\textbf{Thành phần} & \textbf{Công nghệ hiện tại}\\
+\midrule
+Runtime & Python 3.11+.\\
+Quản lý package & \code{uv}, cấu hình trong \code{pyproject.toml}.\\
+Schema & Pydantic v2.\\
+CLI & Typer, entrypoint chính \code{absa-priority}; \code{absa-rec} là alias tương thích.\\
+API & FastAPI + Uvicorn.\\
+Dashboard & Streamlit local dashboard.\\
+Lưu trữ nhẹ & DuckDB file cục bộ.\\
+Batch/Data & Logic Python deterministic; Polars/DuckDB có thể dùng khi cần.\\
+Kiểm thử & Pytest và Ruff. Trạng thái gần nhất: 60 tests passed, Ruff passed.\\
+\bottomrule
+\end{longtable}
+
+\section{Dữ liệu đầu vào}
+
+\subsection{Input ABSA JSONL}
+Mỗi dòng JSONL là một \code{ABSAReview}:
+\begin{lstlisting}
+{
+  "review_id": "rv_001",
+  "review_text": "Bàn hơi bẩn nhưng nhân viên thân thiện.",
+  "restaurant_id": "res_001",
+  "restaurant_name": "Nhà hàng A",
+  "rating": 3,
+  "review_time": "2026-06-14T10:30:00",
+  "review_month": "2026-06",
+  "annotations": [
+    {
+      "aspect_expression": "bàn",
+      "aspect_category": "Cleanliness",
+      "opinion_expression": "hơi bẩn",
+      "sentiment": "negative",
+      "model_confidence": 0.91
+    }
+  ]
+}
+\end{lstlisting}
+
+\code{review_month} là optional. Nếu thiếu và có \code{review_time}, normalizer tự suy ra dạng \code{YYYY-MM}. Nếu cả hai đều thiếu, hệ thống dùng \code{unknown}.
+
+\subsection{Mapping nội bộ}
+Hệ thống không dùng field \code{evidence}. Mapping nội bộ:
+\begin{align}
+\text{\code{aspect_category}} &\mapsto \text{\code{aspect}},\\
+\text{\code{aspect_expression}} &\mapsto \text{\code{aspect_term}},\\
+\text{\code{opinion_expression}} &\mapsto \text{\code{opinion_text}}.
+\end{align}
+
+\code{opinion_examples} trong output luôn lấy từ \code{opinion_expression} thông qua \code{opinion_text}.
+
+\section{Cấu hình}
+
+\subsection{Label schema}
+File \code{configs/label_schema.yaml} chứa aspect và sentiment chính thức. Core logic load label từ config, không hardcode label trong scoring.
+
+\begin{longtable}{p{0.25\linewidth}p{0.65\linewidth}}
+\toprule
+\textbf{Nhóm} & \textbf{Giá trị hiện tại}\\
+\midrule
+Aspects & Food Quality; Food Safety; Service; Price; Cleanliness; Ambience; Location; Menu; Unknown.\\
+Sentiments & positive; neutral; negative.\\
+Validation mode & strict.\\
+Unknown aspect fallback & Unknown.\\
+Unknown sentiment fallback & neutral.\\
+\bottomrule
+\end{longtable}
+
+\subsection{Config hiện tại}
+\begin{longtable}{p{0.36\linewidth}p{0.54\linewidth}}
+\toprule
+\textbf{File} & \textbf{Vai trò}\\
+\midrule
+\code{configs/label_schema.yaml} & Label aspect/sentiment và alias.\\
+\code{configs/severity_lexicon.yaml} & Base severity và pattern nghiêm trọng.\\
+\code{configs/scoring.yaml} & Weight, smoothing, confidence, trend, benchmark và ranking rule.\\
+\code{configs/text_normalization.yaml} & Cấu hình chuẩn hóa text.\\
+\code{configs/crawler.yaml} & Scaffold cho crawler local-first.\\
+\code{configs/peer_discovery.yaml} & Scaffold cho peer discovery.\\
+\code{configs/scheduler.yaml} & Scaffold lịch chạy tháng.\\
+\code{configs/absa_model.yaml} & Metadata cho adapter ABSA bên ngoài.\\
+\code{configs/dashboard.yaml} & Cấu hình dashboard.\\
+\code{configs/source_policy.yaml} & Chính sách nguồn dữ liệu và retention.\\
+\bottomrule
+\end{longtable}
+
+Các config cũ liên quan sub-problem/action đã bị bỏ: \code{subproblem_rules.yaml}, \code{subproblem_prototypes.yaml}, \code{locator.yaml}, \code{action_catalog.yaml}, \code{taxonomy_miner.yaml}.
+
+\section{Pipeline hiện tại}
+
+\subsection{Luồng xử lý chính}
+Hàm trung tâm là \code{generate_priority_ranking} trong \code{src/absa_recommender/recommender.py}. Pipeline:
+\begin{enumerate}
+  \item Load \code{label_schema.yaml}, \code{severity_lexicon.yaml}, \code{scoring.yaml}.
+  \item Parse JSONL thành list \code{ABSAReview}.
+  \item Flatten mỗi annotation thành một \code{AspectExtraction}.
+  \item Validate label và sentiment theo config.
+  \item Tính \code{severity} từ sentiment, aspect và \code{opinion_expression}.
+  \item Suy ra hoặc đọc \code{review_month}.
+  \item Aggregate theo \code{restaurant_id}, \code{review_month}, \code{aspect}.
+  \item Tính global negative rate theo aspect trong batch.
+  \item Tính component scores cho mỗi aspect.
+  \item Nếu có peer benchmark, tính \code{benchmark_gap}.
+  \item Nếu có dữ liệu tháng trước, tính \code{trend_score}.
+  \item Tính \code{priority_score} và \code{priority_confidence}.
+  \item Rank Top-N aspect và áp dụng rule Food Safety Top-3 ở cấp aspect.
+\end{enumerate}
+
+\subsection{Monthly pipeline helpers}
+Repo hiện có các module scaffold deterministic:
+\begin{longtable}{p{0.34\linewidth}p{0.56\linewidth}}
+\toprule
+\textbf{Module} & \textbf{Vai trò}\\
+\midrule
+\code{review_normalizer.py} & Chuẩn hóa raw review dictionary và hash text.\\
+\code{dedup.py} & Dedup bằng \code{source_review_id} hoặc content hash key.\\
+\code{peer_discovery.py} & Lọc peer theo bán kính, type, trạng thái và loại target.\\
+\code{absa_inference.py} & Protocol cho adapter ABSA bên ngoài; không fake model.\\
+\code{benchmark.py} & Tính peer aspect monthly summaries.\\
+\code{trend.py} & Tính trend current-vs-previous month.\\
+\code{ranking.py} & Sort priority item và rule Food Safety Top-3.\\
+\code{scheduler.py} & Helper previous-month và idempotency key.\\
+\code{crawler/monthly.py} & Tạo crawl run record local.\\
+\code{sources/google_maps_adapter.py} & Placeholder không scrape; raise nếu chưa cấu hình nguồn hợp lệ.\\
+\bottomrule
+\end{longtable}
+
+\section{Severity scoring}
+
+\subsection{Base score}
+Base severity:
+\begin{align}
+base(\text{positive}) &= 0.0,\\
+base(\text{neutral}) &= 0.25,\\
+base(\text{negative}) &= 0.75.
+\end{align}
+
+Pattern trong \code{configs/severity_lexicon.yaml} có thể nâng hoặc hạ severity. Safety pattern hoặc aspect Food Safety được đẩy severity cao. Giá trị cuối cùng luôn clamp trong $[0,1]$:
+\begin{equation}
+\operatorname{severity} = \min(1,\max(0,s)).
+\end{equation}
+
+\section{Aggregation theo tháng}
+
+\subsection{Khóa aggregate}
+Aggregate hiện tại dùng khóa:
+\begin{equation}
+(\code{restaurant_id}, \code{review_month}, \code{aspect}).
+\end{equation}
+
+\subsection{Schema \code{AspectStats}}
+\begin{longtable}{p{0.34\linewidth}p{0.56\linewidth}}
+\toprule
+\textbf{Field} & \textbf{Ý nghĩa}\\
+\midrule
+\code{restaurant_id} & Nhà hàng.\\
+\code{review_month} & Tháng review, dạng \code{YYYY-MM}.\\
+\code{aspect} & Aspect chính thức.\\
+\code{mention_count} & Số annotation thuộc aspect.\\
+\code{negative_count}, \code{positive_count}, \code{neutral_count} & Phân phối sentiment.\\
+\code{negative_rate_raw} & \code{negative_count / mention_count}.\\
+\code{negative_rate_smoothed} & Negative rate sau Bayesian smoothing.\\
+\code{avg_severity} & Severity trung bình.\\
+\code{avg_rating} & Rating trung bình, dùng default nếu thiếu.\\
+\code{avg_confidence} & Model confidence trung bình, dùng default nếu thiếu.\\
+\code{mention_share} & Tỷ trọng mention đã log-scale.\\
+\code{rating_gap} & Khoảng cách rating đã normalize.\\
+\code{total_mentions_for_restaurant} & Tổng annotation trong tháng của nhà hàng.\\
+\bottomrule
+\end{longtable}
+
+\section{Priority scoring}
+
+\subsection{Component scores}
+Các component đều nằm trong $[0,1]$:
+\begin{align}
+\text{negative\_rate} &= \frac{negative\_count+\alpha\mu_a}{mention\_count+\alpha},\\
+\text{mention\_share} &= \frac{\log(1+mention\_count)}{\log(1+total\_mentions)},\\
+\text{rating\_gap} &= \frac{5-avg\_rating}{4}.
+\end{align}
+
+\code{trend_score} và \code{benchmark_gap} bằng 0 nếu thiếu dữ liệu tương ứng.
+
+\subsection{Peer benchmark}
+Khi có peer data, benchmark gap:
+\begin{equation}
+\text{benchmark\_gap}
+= \operatorname{clamp}\left(
+\frac{target\_negative\_rate - peer\_negative\_rate}{benchmark\_scale},
+0,1
+\right).
+\end{equation}
+
+Streamlit hiện có thể suy ra peer benchmark từ một file JSONL có nhiều \code{restaurant_id}: \code{Default restaurant_id} là target, các \code{restaurant_id} khác trong cùng tháng là peer.
+
+\subsection{Trend}
+Nếu có dữ liệu tháng trước:
+\begin{align}
+negative\_trend &= \operatorname{clamp}\left(\frac{p_t-p_{t-1}}{negative\_scale},0,1\right),\\
+severity\_trend &= \operatorname{clamp}\left(\frac{s_t-s_{t-1}}{severity\_scale},0,1\right),\\
+trend\_score &= 0.7\cdot negative\_trend + 0.3\cdot severity\_trend.
+\end{align}
+
+Nếu thiếu history, \code{trend_score=0} và flag \code{insufficient_history}.
+
+\subsection{Priority score}
+Với component vector $x_i$ và weight $w_i$:
+\begin{equation}
+priority\_score = 100 \cdot \operatorname{clamp}
+\left(risk\_multiplier(aspect)\cdot \sum_i w_i x_i,0,1\right).
+\end{equation}
+
+Weights hiện tại trong \code{configs/scoring.yaml}:
+\begin{longtable}{p{0.38\linewidth}p{0.2\linewidth}}
+\toprule
+\textbf{Component} & \textbf{Weight}\\
+\midrule
+\code{negative_rate} & 0.25\\
+\code{sentiment_severity} & 0.18\\
+\code{mention_share} & 0.12\\
+\code{rating_gap} & 0.12\\
+\code{trend_score} & 0.16\\
+\code{benchmark_gap} & 0.17\\
+\bottomrule
+\end{longtable}
+
+\subsection{Priority confidence}
+\begin{equation}
+priority\_confidence
+= 0.45C_{support}+0.30C_{model}+0.15C_{peer}+0.10C_{history}.
+\end{equation}
+
+\section{Output schema}
+
+\begin{lstlisting}
+{
+  "restaurant_id": "res_demo",
+  "restaurant_name": "Nha hang Demo",
+  "review_month": "2026-06",
+  "generated_at": "...",
+  "top_n": 5,
+  "items": [
+    {
+      "rank": 1,
+      "aspect": "Service",
+      "priority_score": 39.88,
+      "priority_confidence": 0.68,
+      "severity": 0.75,
+      "mention_count": 103,
+      "negative_count": 80,
+      "negative_rate_smoothed": 0.74,
+      "mention_share": 0.84,
+      "rating_gap": 0.52,
+      "trend_score": 0.0,
+      "benchmark_gap": 1.0,
+      "risk_multiplier": 1.0,
+      "component_scores": {
+        "negative_rate": 0.74,
+        "sentiment_severity": 0.75,
+        "mention_share": 0.84,
+        "rating_gap": 0.52,
+        "trend_score": 0.0,
+        "benchmark_gap": 1.0
+      },
+      "peer_summary": {
+        "peer_restaurant_count": 6,
+        "peer_negative_rate": 0.0,
+        "target_vs_peer_gap": 1.0,
+        "peer_support_flag": null
+      },
+      "trend_summary": {
+        "previous_month_priority_score": null,
+        "priority_delta": null,
+        "negative_rate_delta": null,
+        "trend_flag": "insufficient_history"
+      },
+      "opinion_examples": ["..."],
+      "data_quality_flags": ["insufficient_history"]
+    }
+  ]
+}
+\end{lstlisting}
+
+\section{API, CLI và Streamlit}
+
+\subsection{CLI}
+Entry point chính:
+\begin{lstlisting}
+uv run absa-priority validate --input data/samples/streamlit_priority_200.jsonl
+uv run absa-priority score-priority --input data/samples/streamlit_priority_200.jsonl --restaurant-id res_demo --month 2026-06 --top-n 10 --output out/priority.json
+uv run absa-priority run-monthly --input data/samples/streamlit_priority_200.jsonl --restaurant-id res_demo --month 2026-06
+uv run absa-priority compute-stats --input data/samples/streamlit_priority_200.jsonl --restaurant-id res_demo --month 2026-06
+uv run absa-priority show-labels
+\end{lstlisting}
+
+Các command scaffold:
+\begin{lstlisting}
+uv run absa-priority discover-peers res_demo --radius-meters 1500
+uv run absa-priority crawl-month res_demo 2026-06
+uv run absa-priority infer-absa 2026-06
+uv run absa-priority backfill res_demo 2026-01 2026-06
+\end{lstlisting}
+
+\subsection{FastAPI endpoints}
+\begin{longtable}{p{0.42\linewidth}p{0.48\linewidth}}
+\toprule
+\textbf{Endpoint} & \textbf{Vai trò}\\
+\midrule
+\code{GET /health} & Health check.\\
+\code{GET /api/v1/labels} & Trả label schema.\\
+\code{POST /api/v1/priority/run} & Nhận ABSAReview list, trả PriorityResponse.\\
+\code{POST /api/v1/monthly/run} & Alias monthly priority run từ ABSA hiện có.\\
+\code{POST /api/v1/absa/infer} & Placeholder cho ABSA adapter bên ngoài.\\
+\code{POST /api/v1/crawl/run} & Placeholder cho source adapter/crawl.\\
+\code{GET /api/v1/restaurants/\{id\}/priority} & Placeholder đọc persisted priority.\\
+\code{GET /api/v1/restaurants/\{id\}/dashboard} & Placeholder dashboard payload.\\
+\code{GET /api/v1/restaurants/\{id\}/history} & Placeholder history.\\
+\code{GET /api/v1/restaurants/\{id\}/aspects/\{aspect\}/history} & Placeholder aspect history.\\
+\code{GET /api/v1/restaurants/\{id\}/peer-benchmark} & Placeholder peer benchmark.\\
+\bottomrule
+\end{longtable}
+
+\subsection{Streamlit dashboard}
+File \code{app/streamlit_app.py} cung cấp các tab:
+\begin{itemize}
+  \item Monthly Overview;
+  \item Top-N Aspects;
+  \item Aspect Detail;
+  \item Peer Benchmark;
+  \item History;
+  \item Data Quality.
+\end{itemize}
+
+Dataset test hiện tại: \code{data/samples/streamlit_priority_200.jsonl}. File này có target \code{res_demo} và sáu peer \code{res_peer_01} đến \code{res_peer_06}. Khi chạy dashboard, nhập:
+\begin{lstlisting}
+Default restaurant_id = res_demo
+Review month = 2026-06
+\end{lstlisting}
+Dashboard sẽ tính peer benchmark từ các nhà hàng peer trong cùng file.
+
+\section{DuckDB local storage}
+
+\subsection{Schema hiện tại}
+\begin{longtable}{p{0.34\linewidth}p{0.56\linewidth}}
+\toprule
+\textbf{Bảng} & \textbf{Vai trò}\\
+\midrule
+\code{restaurants} & Metadata target/peer restaurant.\\
+\code{crawl_runs} & Thông tin một lần crawl theo tháng.\\
+\code{reviews} & Review đã normalize.\\
+\code{absa_annotations} & Annotation ABSA đã flatten, có severity.\\
+\code{aspect_monthly_stats} & Aggregate theo restaurant, month, aspect.\\
+\code{peer_aspect_monthly_stats} & Peer benchmark theo area, target, month, aspect.\\
+\code{priority_runs} & Snapshot một lần score priority.\\
+\code{priority_items} & Top-N aspect items trong một priority run.\\
+\bottomrule
+\end{longtable}
+
+Các bảng cũ \code{recommendation_runs}, \code{recommendation_items}, \code{subproblem_predictions}, \code{taxonomy_gap_reports}, \code{feedback} đã không còn là schema hiện tại.
+
+\section{Monitoring và evaluation}
+
+\subsection{Monitoring}
+\code{src/absa_recommender/monitoring.py} theo dõi:
+\begin{itemize}
+  \item \code{crawl_success_rate};
+  \item \code{reviews_fetched_count};
+  \item \code{new_review_count};
+  \item \code{duplicate_rate};
+  \item \code{missing_review_time_rate};
+  \item \code{absa_inference_failure_rate};
+  \item \code{low_confidence_annotation_rate};
+  \item \code{aspect_coverage};
+  \item \code{peer_support_rate};
+  \item \code{dashboard_data_freshness}.
+\end{itemize}
+
+Alert hiện tại:
+\begin{longtable}{p{0.42\linewidth}p{0.48\linewidth}}
+\toprule
+\textbf{Điều kiện} & \textbf{Ý nghĩa}\\
+\midrule
+\code{crawl_success_rate < 0.90} & Kiểm tra source adapter hoặc quota.\\
+\code{peer_support_rate < 0.70} & Peer quá ít hoặc filter/area quá hẹp.\\
+\code{missing_review_time_rate > 0.30} & Trend theo tháng có thể không đáng tin.\\
+\code{low_confidence_annotation_rate > 0.25} & Kiểm tra chất lượng model ABSA.\\
+\bottomrule
+\end{longtable}
+
+\subsection{Evaluation}
+\code{src/absa_recommender/evaluation.py} hiện có:
+\begin{itemize}
+  \item \code{aspect_coverage};
+  \item \code{peer_support_rate};
+  \item \code{priority_score_stability}.
+\end{itemize}
+
+\section{Local development và kiểm thử}
+
+\subsection{Chạy test}
+\begin{lstlisting}
+uv run pytest
+uv run ruff check .
+\end{lstlisting}
+
+Kết quả kiểm chứng gần nhất:
+\begin{lstlisting}
+60 passed
+All checks passed!
+\end{lstlisting}
+
+\subsection{Chạy dashboard}
+\begin{lstlisting}
+uv run streamlit run app/streamlit_app.py
+\end{lstlisting}
+
+\subsection{Chạy API}
+\begin{lstlisting}
+uv run uvicorn absa_recommender.api:app --reload
+\end{lstlisting}
+
+\section{Kết luận}
+
+Phiên bản hiện tại đã chuyển từ \textit{Aspect-to-Action Recommender} sang \textit{ABSA Aspect Priority Engine}. Trọng tâm mới là xếp hạng aspect cần cải thiện theo tháng, giải thích bằng component score, severity, support, trend, benchmark peer và data quality flags. Các phần sub-problem detection, action recommendation, KPI action catalog, taxonomy mining và feedback action đã bị loại bỏ để hệ thống khớp mục tiêu mới trong \code{Goals.md}.
+
+\end{document}

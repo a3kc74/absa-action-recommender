@@ -49,6 +49,7 @@ def test_flatten_maps_annotation_fields_to_internal_names() -> None:
     assert extraction.opinion_text == "không hề đậm đà không có vị thịt chỉ toàn nước muối"
     assert extraction.sentiment == "negative"
     assert extraction.severity >= 0.9
+    assert extraction.review_month == "2026-05"
 
 
 def test_unknown_aspect_strict_mode_fails_during_flatten() -> None:

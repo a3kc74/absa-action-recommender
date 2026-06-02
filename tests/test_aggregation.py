@@ -15,15 +15,15 @@ def test_grouping_works_for_food_quality_cleanliness_location_menu() -> None:
     extractions = flatten_reviews(reviews, LABEL_SCHEMA)
 
     stats = aggregate_aspect_stats(extractions, SCORING_CONFIG)
-    stats_by_key = {(item.restaurant_id, item.aspect): item for item in stats}
+    stats_by_key = {(item.restaurant_id, item.review_month, item.aspect): item for item in stats}
 
-    assert ("rest_001", "Food Quality") in stats_by_key
-    assert ("rest_002", "Location") in stats_by_key
-    assert ("rest_003", "Cleanliness") in stats_by_key
-    assert ("rest_003", "Menu") in stats_by_key
-    assert stats_by_key[("rest_002", "Location")].mention_count == 2
-    assert stats_by_key[("rest_002", "Location")].negative_count == 2
-    assert stats_by_key[("rest_002", "Location")].total_mentions_for_restaurant == 3
+    assert ("rest_001", "2026-05", "Food Quality") in stats_by_key
+    assert ("rest_002", "2026-05", "Location") in stats_by_key
+    assert ("rest_003", "2026-06", "Cleanliness") in stats_by_key
+    assert ("rest_003", "2026-06", "Menu") in stats_by_key
+    assert stats_by_key[("rest_002", "2026-05", "Location")].mention_count == 2
+    assert stats_by_key[("rest_002", "2026-05", "Location")].negative_count == 2
+    assert stats_by_key[("rest_002", "2026-05", "Location")].total_mentions_for_restaurant == 3
 
 
 def test_missing_rating_uses_default() -> None:
@@ -60,4 +60,5 @@ def _extraction(
         review_text="Menu khó hiểu.",
         rating=rating,
         review_time=None,
+        review_month="2026-06",
     )

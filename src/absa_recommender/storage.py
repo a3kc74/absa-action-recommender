@@ -1,287 +1,305 @@
 import json
 import uuid
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 import duckdb
 
-from absa_recommender.schemas import RecommendationResponse
+from absa_recommender.schemas import PriorityResponse
 
 
 def init_db(db_path: str | Path) -> None:
     with _connect(db_path) as connection:
         connection.execute(
             """
-            CREATE TABLE IF NOT EXISTS recommendation_runs (
-                run_id VARCHAR PRIMARY KEY,
+            CREATE TABLE IF NOT EXISTS restaurants (
+                restaurant_id VARCHAR PRIMARY KEY,
+                source VARCHAR,
+                source_place_id VARCHAR,
+                name VARCHAR,
+                lat DOUBLE,
+                lng DOUBLE,
+                area_id VARCHAR,
+                is_target BOOLEAN,
+                is_peer BOOLEAN,
+                status VARCHAR,
+                first_seen_at TIMESTAMP,
+                last_seen_at TIMESTAMP
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS crawl_runs (
+                crawl_run_id VARCHAR PRIMARY KEY,
+                source VARCHAR,
+                target_month VARCHAR,
+                area_id VARCHAR,
+                started_at TIMESTAMP,
+                finished_at TIMESTAMP,
+                status VARCHAR,
+                num_restaurants INTEGER,
+                num_reviews_fetched INTEGER,
+                num_reviews_inserted INTEGER,
+                num_duplicates INTEGER,
+                error_message VARCHAR
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS reviews (
+                review_id VARCHAR PRIMARY KEY,
+                crawl_run_id VARCHAR,
                 restaurant_id VARCHAR,
+                source VARCHAR,
+                source_review_id VARCHAR,
+                review_text VARCHAR,
+                review_text_hash VARCHAR,
+                rating INTEGER,
+                review_time TIMESTAMP,
+                review_month VARCHAR,
+                language VARCHAR,
+                fetched_at TIMESTAMP
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS absa_annotations (
+                annotation_id VARCHAR PRIMARY KEY,
+                review_id VARCHAR,
+                restaurant_id VARCHAR,
+                review_month VARCHAR,
+                aspect VARCHAR,
+                aspect_term VARCHAR,
+                opinion_text VARCHAR,
+                sentiment VARCHAR,
+                model_confidence DOUBLE,
+                severity DOUBLE,
+                absa_model_version VARCHAR,
+                created_at TIMESTAMP
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS aspect_monthly_stats (
+                restaurant_id VARCHAR,
+                review_month VARCHAR,
+                aspect VARCHAR,
+                mention_count INTEGER,
+                negative_count INTEGER,
+                positive_count INTEGER,
+                neutral_count INTEGER,
+                negative_rate_raw DOUBLE,
+                negative_rate_smoothed DOUBLE,
+                avg_severity DOUBLE,
+                avg_rating DOUBLE,
+                avg_confidence DOUBLE,
+                mention_share DOUBLE,
+                rating_gap DOUBLE,
+                total_mentions_for_restaurant INTEGER,
+                PRIMARY KEY (restaurant_id, review_month, aspect)
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS peer_aspect_monthly_stats (
+                area_id VARCHAR,
+                target_restaurant_id VARCHAR,
+                review_month VARCHAR,
+                aspect VARCHAR,
+                peer_restaurant_count INTEGER,
+                peer_total_mentions INTEGER,
+                peer_negative_rate DOUBLE,
+                peer_avg_severity DOUBLE,
+                peer_avg_rating DOUBLE,
+                peer_p50_negative_rate DOUBLE,
+                peer_p75_negative_rate DOUBLE,
+                peer_p90_negative_rate DOUBLE,
+                peer_support_confidence DOUBLE,
+                PRIMARY KEY (area_id, target_restaurant_id, review_month, aspect)
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS priority_runs (
+                priority_run_id VARCHAR PRIMARY KEY,
+                restaurant_id VARCHAR,
+                review_month VARCHAR,
                 generated_at TIMESTAMP,
-                input_hash VARCHAR,
+                crawl_run_id VARCHAR,
+                absa_model_version VARCHAR,
                 scoring_config_hash VARCHAR,
-                model_version VARCHAR,
+                status VARCHAR,
                 output_json VARCHAR
             )
             """
         )
         connection.execute(
             """
-            CREATE TABLE IF NOT EXISTS recommendation_items (
-                recommendation_id VARCHAR PRIMARY KEY,
-                run_id VARCHAR,
+            CREATE TABLE IF NOT EXISTS priority_items (
+                priority_run_id VARCHAR,
+                restaurant_id VARCHAR,
+                review_month VARCHAR,
                 rank INTEGER,
                 aspect VARCHAR,
-                sub_problem_id VARCHAR,
                 priority_score DOUBLE,
-                confidence DOUBLE,
+                priority_confidence DOUBLE,
+                severity DOUBLE,
+                mention_count INTEGER,
+                negative_count INTEGER,
+                negative_rate_smoothed DOUBLE,
+                mention_share DOUBLE,
+                rating_gap DOUBLE,
+                trend_score DOUBLE,
+                benchmark_gap DOUBLE,
+                risk_multiplier DOUBLE,
                 component_scores_json VARCHAR,
+                peer_summary_json VARCHAR,
+                trend_summary_json VARCHAR,
                 opinion_examples_json VARCHAR,
-                actions_json VARCHAR,
-                kpis_json VARCHAR
-            )
-            """
-        )
-        connection.execute(
-            """
-            CREATE TABLE IF NOT EXISTS subproblem_predictions (
-                prediction_id VARCHAR PRIMARY KEY,
-                run_id VARCHAR,
-                review_id VARCHAR,
-                aspect_category VARCHAR,
-                aspect_expression VARCHAR,
-                opinion_expression VARCHAR,
-                sentiment VARCHAR,
-                model_confidence DOUBLE,
-                predicted_sub_problem_id VARCHAR,
-                locator_score DOUBLE,
-                match_type VARCHAR,
-                needs_review BOOLEAN
-            )
-            """
-        )
-        connection.execute(
-            """
-            CREATE TABLE IF NOT EXISTS taxonomy_gap_reports (
-                report_id VARCHAR PRIMARY KEY,
-                run_id VARCHAR,
-                created_at TIMESTAMP,
-                report_json VARCHAR
-            )
-            """
-        )
-        connection.execute(
-            """
-            CREATE TABLE IF NOT EXISTS feedback (
-                feedback_id VARCHAR PRIMARY KEY,
-                recommendation_id VARCHAR,
-                implemented BOOLEAN,
-                implementation_date DATE,
-                manager_rating INTEGER,
-                comment VARCHAR,
-                created_at TIMESTAMP
+                data_quality_flags_json VARCHAR,
+                PRIMARY KEY (priority_run_id, rank)
             )
             """
         )
 
 
-def save_recommendation_run(
+def save_priority_run(
     db_path: str | Path,
-    response: RecommendationResponse,
-    input_hash: str,
+    response: PriorityResponse,
     scoring_config_hash: str,
-    model_version: str = "unknown",
+    crawl_run_id: str | None = None,
+    absa_model_version: str = "unknown",
+    status: str = "completed",
 ) -> str:
     init_db(db_path)
-    run_id = _new_id("run")
+    run_id = _new_id("priority")
     with _connect(db_path) as connection:
         connection.execute(
             """
-            INSERT INTO recommendation_runs
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO priority_runs
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 run_id,
                 response.restaurant_id,
+                response.review_month,
                 response.generated_at,
-                input_hash,
+                crawl_run_id,
+                absa_model_version,
                 scoring_config_hash,
-                model_version,
+                status,
                 response.model_dump_json(),
             ],
         )
-    save_recommendation_items(db_path, run_id, response)
+    save_priority_items(db_path, run_id, response)
     return run_id
 
 
-def save_recommendation_items(
+def save_priority_items(
     db_path: str | Path,
-    run_id: str,
-    response: RecommendationResponse,
-) -> list[str]:
+    priority_run_id: str,
+    response: PriorityResponse,
+) -> None:
     init_db(db_path)
-    recommendation_ids = []
     with _connect(db_path) as connection:
-        for item in response.recommendations:
-            recommendation_id = f"{run_id}_rank_{item.rank}"
-            recommendation_ids.append(recommendation_id)
+        for item in response.items:
             connection.execute(
                 """
-                INSERT INTO recommendation_items
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO priority_items
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 [
-                    recommendation_id,
-                    run_id,
+                    priority_run_id,
+                    response.restaurant_id,
+                    response.review_month,
                     item.rank,
                     item.aspect,
-                    item.sub_problem_id,
                     item.priority_score,
-                    item.confidence,
+                    item.priority_confidence,
+                    item.severity,
+                    item.mention_count,
+                    item.negative_count,
+                    item.negative_rate_smoothed,
+                    item.mention_share,
+                    item.rating_gap,
+                    item.trend_score,
+                    item.benchmark_gap,
+                    item.risk_multiplier,
                     _json(item.component_scores),
+                    item.peer_summary.model_dump_json(),
+                    item.trend_summary.model_dump_json(),
                     _json(item.opinion_examples),
-                    _json(item.recommended_actions),
-                    _json(item.monitoring_kpis),
+                    _json(item.data_quality_flags),
                 ],
             )
-    return recommendation_ids
 
 
-def save_subproblem_predictions(
-    db_path: str | Path,
-    predictions: list[dict[str, Any]],
-    run_id: str | None = None,
-) -> list[str]:
-    init_db(db_path)
-    prediction_ids = []
-    with _connect(db_path) as connection:
-        for prediction in predictions:
-            prediction_id = _new_id("pred")
-            prediction_ids.append(prediction_id)
-            connection.execute(
-                """
-                INSERT INTO subproblem_predictions
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                [
-                    prediction_id,
-                    run_id,
-                    prediction.get("review_id"),
-                    prediction.get("aspect_category"),
-                    prediction.get("aspect_expression"),
-                    prediction.get("opinion_expression"),
-                    prediction.get("sentiment"),
-                    prediction.get("model_confidence"),
-                    prediction.get("predicted_sub_problem_id"),
-                    prediction.get("locator_score"),
-                    prediction.get("match_type"),
-                    prediction.get("needs_review"),
-                ],
-            )
-    return prediction_ids
-
-
-def save_taxonomy_gap_report(
-    db_path: str | Path,
-    report: dict[str, Any],
-    run_id: str | None = None,
-) -> str:
-    init_db(db_path)
-    report_id = _new_id("report")
-    with _connect(db_path) as connection:
-        connection.execute(
-            """
-            INSERT INTO taxonomy_gap_reports
-            VALUES (?, ?, ?, ?)
-            """,
-            [report_id, run_id, _now(), _json(report)],
-        )
-    return report_id
-
-
-def save_feedback(
-    db_path: str | Path,
-    recommendation_id: str,
-    implemented: bool,
-    implementation_date: date | str | None,
-    manager_rating: int | None,
-    comment: str | None,
-) -> str:
-    init_db(db_path)
-    feedback_id = _new_id("feedback")
-    with _connect(db_path) as connection:
-        connection.execute(
-            """
-            INSERT INTO feedback
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
-            [
-                feedback_id,
-                recommendation_id,
-                implemented,
-                implementation_date,
-                manager_rating,
-                comment,
-                _now(),
-            ],
-        )
-    return feedback_id
-
-
-def list_runs(db_path: str | Path, restaurant_id: str | None = None) -> list[dict[str, Any]]:
+def list_priority_runs(db_path: str | Path, restaurant_id: str | None = None) -> list[dict[str, Any]]:
     init_db(db_path)
     with _connect(db_path) as connection:
         if restaurant_id is None:
             rows = connection.execute(
                 """
-                SELECT run_id, restaurant_id, generated_at, input_hash,
-                       scoring_config_hash, model_version
-                FROM recommendation_runs
+                SELECT priority_run_id, restaurant_id, review_month, generated_at,
+                       crawl_run_id, absa_model_version, scoring_config_hash, status
+                FROM priority_runs
                 ORDER BY generated_at DESC
                 """
             ).fetchall()
         else:
             rows = connection.execute(
                 """
-                SELECT run_id, restaurant_id, generated_at, input_hash,
-                       scoring_config_hash, model_version
-                FROM recommendation_runs
+                SELECT priority_run_id, restaurant_id, review_month, generated_at,
+                       crawl_run_id, absa_model_version, scoring_config_hash, status
+                FROM priority_runs
                 WHERE restaurant_id = ?
                 ORDER BY generated_at DESC
                 """,
                 [restaurant_id],
             ).fetchall()
     columns = [
-        "run_id",
+        "priority_run_id",
         "restaurant_id",
+        "review_month",
         "generated_at",
-        "input_hash",
+        "crawl_run_id",
+        "absa_model_version",
         "scoring_config_hash",
-        "model_version",
+        "status",
     ]
     return [dict(zip(columns, row, strict=True)) for row in rows]
 
 
-def get_run(db_path: str | Path, run_id: str) -> dict[str, Any] | None:
+def get_priority_run(db_path: str | Path, priority_run_id: str) -> dict[str, Any] | None:
     init_db(db_path)
     with _connect(db_path) as connection:
         row = connection.execute(
             """
-            SELECT run_id, restaurant_id, generated_at, input_hash,
-                   scoring_config_hash, model_version, output_json
-            FROM recommendation_runs
-            WHERE run_id = ?
+            SELECT priority_run_id, restaurant_id, review_month, generated_at,
+                   crawl_run_id, absa_model_version, scoring_config_hash, status, output_json
+            FROM priority_runs
+            WHERE priority_run_id = ?
             """,
-            [run_id],
+            [priority_run_id],
         ).fetchone()
     if row is None:
         return None
     columns = [
-        "run_id",
+        "priority_run_id",
         "restaurant_id",
+        "review_month",
         "generated_at",
-        "input_hash",
+        "crawl_run_id",
+        "absa_model_version",
         "scoring_config_hash",
-        "model_version",
+        "status",
         "output_json",
     ]
     result = dict(zip(columns, row, strict=True))

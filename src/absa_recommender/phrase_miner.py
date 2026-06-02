@@ -1,6 +1,11 @@
 from collections import Counter
+import re
+import unicodedata
 
-from absa_recommender.subproblem import normalize_text
+
+def normalize_text(value: str) -> str:
+    normalized = unicodedata.normalize("NFC", value).lower().strip()
+    return re.sub(r"\s+", " ", normalized)
 
 
 def cluster_text(aspect_expression: str, opinion_expression: str) -> str:

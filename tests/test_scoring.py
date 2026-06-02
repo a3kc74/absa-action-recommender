@@ -12,7 +12,9 @@ from absa_recommender.scoring import (
     log_mention_share,
     model_confidence,
     normalized_rating_gap,
+    priority_confidence,
     smoothed_negative_rate,
+    scaled_benchmark_gap,
     support_confidence,
 )
 
@@ -133,6 +135,14 @@ def test_component_scores_are_clamped_to_0_1() -> None:
     assert normalized_rating_gap(avg_rating=0.0) == 1.0
     assert model_confidence(avg_confidence=2.0) == 1.0
     assert benchmark_gap(neg_rate=0.8, peer_avg_neg_rate=None) == 0.0
+    assert scaled_benchmark_gap(0.6, 0.3, 0.3) == 1.0
+
+
+def test_priority_confidence_uses_support_model_peer_and_history() -> None:
+    confidence = priority_confidence(1.0, 0.8, 0.5, 1.0, SCORING_CONFIG)
+
+    assert 0.0 <= confidence <= 1.0
+    assert confidence > 0.7
 
 
 def test_compute_global_negative_rate_by_aspect() -> None:
@@ -163,14 +173,19 @@ def _component_scores() -> dict[str, float]:
 def _stats(aspect: str) -> AspectStats:
     return AspectStats(
         restaurant_id="rest_001",
+        review_month="2026-06",
         aspect=aspect,
         mention_count=10,
         negative_count=5,
         positive_count=3,
         neutral_count=2,
+        negative_rate_raw=0.5,
+        negative_rate_smoothed=0.5,
         avg_severity=0.75,
         avg_rating=3.0,
         avg_confidence=0.8,
+        mention_share=0.4,
+        rating_gap=0.5,
         total_mentions_for_restaurant=20,
         window_start=datetime(2026, 5, 1),
         window_end=datetime(2026, 6, 1),
@@ -192,4 +207,5 @@ def _extraction(aspect: str, sentiment: str) -> AspectExtraction:
         review_text="review",
         rating=3,
         review_time=None,
+        review_month="2026-06",
     )

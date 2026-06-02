@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from typer.testing import CliRunner
@@ -17,13 +18,13 @@ def test_validate_command_exits_0() -> None:
     assert "annotations: 7" in result.output
 
 
-def test_recommend_creates_output_json(tmp_path: Path) -> None:
-    output = tmp_path / "recommendations.json"
+def test_score_priority_creates_output_json(tmp_path: Path) -> None:
+    output = tmp_path / "priority.json"
 
     result = runner.invoke(
         app,
         [
-            "recommend",
+            "score-priority",
             "--input",
             str(SAMPLE_PATH),
             "--restaurant-id",
@@ -35,9 +36,18 @@ def test_recommend_creates_output_json(tmp_path: Path) -> None:
         ],
     )
 
+    payload = json.loads(output.read_text(encoding="utf-8"))
     assert result.exit_code == 0
     assert output.exists()
+    assert payload["items"]
     assert "saved:" in result.output
+
+
+def test_placeholder_source_commands_exit_0() -> None:
+    assert runner.invoke(app, ["discover-peers", "res_demo"]).exit_code == 0
+    assert runner.invoke(app, ["crawl-month", "res_demo", "2026-06"]).exit_code == 0
+    assert runner.invoke(app, ["infer-absa", "2026-06"]).exit_code == 0
+    assert runner.invoke(app, ["backfill", "res_demo", "2026-01", "2026-06"]).exit_code == 0
 
 
 def test_show_labels_includes_location_and_menu() -> None:
@@ -46,79 +56,3 @@ def test_show_labels_includes_location_and_menu() -> None:
     assert result.exit_code == 0
     assert "Location" in result.output
     assert "Menu" in result.output
-
-
-def test_locate_subproblems_creates_jsonl(tmp_path: Path) -> None:
-    output = tmp_path / "subproblem_predictions.jsonl"
-
-    result = runner.invoke(
-        app,
-        ["locate-subproblems", "--input", str(SAMPLE_PATH), "--output", str(output)],
-    )
-
-    assert result.exit_code == 0
-    assert output.exists()
-    assert output.read_text(encoding="utf-8").strip()
-
-
-def test_mine_taxonomy_creates_yaml_and_csv(tmp_path: Path) -> None:
-    predictions = tmp_path / "subproblem_predictions.jsonl"
-    report = tmp_path / "taxonomy_gap_report.yaml"
-    csv = tmp_path / "unmatched_annotations.csv"
-    locate_result = runner.invoke(
-        app,
-        ["locate-subproblems", "--input", str(SAMPLE_PATH), "--output", str(predictions)],
-    )
-
-    result = runner.invoke(
-        app,
-        [
-            "mine-taxonomy",
-            "--predictions",
-            str(predictions),
-            "--output-report",
-            str(report),
-            "--output-csv",
-            str(csv),
-        ],
-    )
-
-    assert locate_result.exit_code == 0
-    assert result.exit_code == 0
-    assert report.exists()
-    assert csv.exists()
-
-
-def test_evaluate_command_outputs_metrics(tmp_path: Path) -> None:
-    output = tmp_path / "recommendations.json"
-    recommend_result = runner.invoke(
-        app,
-        [
-            "recommend",
-            "--input",
-            str(SAMPLE_PATH),
-            "--restaurant-id",
-            "res_demo",
-            "--top-n",
-            "5",
-            "--output",
-            str(output),
-        ],
-    )
-
-    result = runner.invoke(
-        app,
-        [
-            "evaluate",
-            "--predictions",
-            str(output),
-            "--gold",
-            "data/gold.json",
-            "--k",
-            "5",
-        ],
-    )
-
-    assert recommend_result.exit_code == 0
-    assert result.exit_code == 0
-    assert "precision_at_k" in result.output
