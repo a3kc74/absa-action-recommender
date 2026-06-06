@@ -7,11 +7,16 @@ requires-python = ">=3.11"
 dependencies = [
     "duckdb",
     "fastapi",
+    "playwright",
     "polars",
     "pydantic",
     "pyyaml",
+    "safetensors",
     "scikit-learn",
+    "sentencepiece",
     "streamlit",
+    "torch==2.11.0+cu128",
+    "transformers",
     "typer",
     "uvicorn",
 ]
@@ -19,6 +24,14 @@ dependencies = [
 [project.scripts]
 absa-priority = "absa_recommender.cli:app"
 absa-rec = "absa_recommender.cli:app"
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu128" }
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
 
 [dependency-groups]
 dev = [

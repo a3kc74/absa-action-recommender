@@ -7,13 +7,14 @@ WORKDIR /app
 
 RUN pip install --no-cache-dir uv
 
-COPY pyproject.toml uv.lock* ./
-RUN uv sync --frozen
-
+COPY pyproject.toml uv.lock* README.md ./
 COPY src ./src
+RUN uv sync --frozen
+RUN uv run playwright install --with-deps chromium
+
 COPY configs ./configs
 COPY app ./app
-COPY README.md ./
+COPY models ./models
 
 EXPOSE 8000
 

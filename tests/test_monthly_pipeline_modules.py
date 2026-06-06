@@ -2,10 +2,7 @@ from datetime import date
 
 import pytest
 
-from absa_recommender.absa_inference import (
-    ExternalABSAInferenceNotConfigured,
-    infer_absa_with_adapter,
-)
+from absa_recommender.absa_inference import infer_absa_with_adapter
 from absa_recommender.benchmark import compute_peer_aspect_stats
 from absa_recommender.crawler import build_crawl_run
 from absa_recommender.dedup import deduplicate_reviews
@@ -16,6 +13,7 @@ from absa_recommender.review_normalizer import normalize_review
 from absa_recommender.schemas import PeerSummary, PriorityItem, TrendSummary
 from absa_recommender.scheduler import previous_month_for_run, priority_idempotency_key
 from absa_recommender.sources.google_maps_adapter import GoogleMapsAdapter
+from absa_recommender.sources.local_jsonl_adapter import LocalJsonlAdapter
 from absa_recommender.trend import compute_trend_score
 
 
@@ -95,11 +93,31 @@ def test_scheduler_and_crawler_helpers() -> None:
     assert crawl_run["status"] == "created"
 
 
-def test_source_and_inference_placeholders_are_explicit() -> None:
+def test_source_and_inference_adapters_are_explicit() -> None:
     with pytest.raises(RuntimeError):
         GoogleMapsAdapter().fetch_reviews()
-    with pytest.raises(ExternalABSAInferenceNotConfigured):
-        infer_absa_with_adapter([])
+    reviews = infer_absa_with_adapter(
+        [
+            {
+                "review_id": "rv_1",
+                "review_text": "bad service",
+                "annotations": [
+                    {
+                        "aspect_expression": "service",
+                        "aspect_category": "Service",
+                        "opinion_expression": "bad",
+                        "sentiment": "negative",
+                    }
+                ],
+            }
+        ]
+    )
+    assert reviews[0].review_id == "rv_1"
+    local_rows = LocalJsonlAdapter("data/samples/streamlit_priority_200.jsonl").fetch_reviews(
+        restaurant_id="res_demo",
+        month="2026-06",
+    )
+    assert local_rows
 
 
 def test_ranking_helper_and_priority_alias() -> None:
