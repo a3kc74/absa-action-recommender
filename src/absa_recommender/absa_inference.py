@@ -80,7 +80,6 @@ class ViT5ABSAAdapter:
                 num_beams=num_beams,
                 fallback_to_cpu=fallback_to_cpu,
             )
-            sequences = generated.sequences
             outputs.extend(
                 self._review_from_generation(review, text, confidence)
                 for review, text, confidence in zip(batch, decoded, confidences, strict=True)

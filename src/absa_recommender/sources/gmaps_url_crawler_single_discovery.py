@@ -2444,7 +2444,7 @@ async def _expand_review_text_if_collapsed(card) -> bool:
                     clicked_this_pass = True
                     changed_any = changed_any or changed
                     break
-                except Exception as exc:
+                except Exception:
                     continue
             if clicked_this_pass:
                 break
