@@ -31,8 +31,8 @@ google_maps:
     input_urls_path:
     mode: benchmark
     headful: true
-    max_discovered_places: 3
-    max_reviews_per_restaurant: 5
+    max_discovered_places: 30
+    max_reviews_per_restaurant: 200
     stop_after_old_reviews: 5
     min_peers: 0
     min_restaurants: 0
