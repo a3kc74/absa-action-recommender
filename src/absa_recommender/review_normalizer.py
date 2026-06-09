@@ -2,11 +2,14 @@ import hashlib
 from datetime import datetime
 from typing import Any
 
+from absa_recommender.text_normalizer import normalize_review_text
+
 
 def normalize_review(raw: dict[str, Any], default_source: str = "local") -> dict[str, Any]:
     review_time = raw.get("review_time")
     review_month = raw.get("review_month") or _review_month(review_time)
-    text = str(raw.get("review_text") or raw.get("text") or "")
+    raw_text = str(raw.get("review_text") or raw.get("text") or "")
+    text = normalize_review_text(raw_text)
     return {
         "source": raw.get("source", default_source),
         "source_place_id": raw.get("source_place_id"),

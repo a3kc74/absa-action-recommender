@@ -67,6 +67,7 @@ def _bootstrap_streamlit_if_direct_run() -> None:
 _bootstrap_streamlit_if_direct_run()
 
 import altair as alt  # noqa: E402
+import duckdb  # noqa: E402
 import streamlit as st  # noqa: E402
 
 from absa_recommender.aggregation import aggregate_aspect_stats  # noqa: E402
@@ -82,6 +83,7 @@ from absa_recommender.explore_jobs import (  # noqa: E402
     start_explore_job,
 )
 from absa_recommender.normalize_absa import flatten_reviews, load_absa_jsonl  # noqa: E402
+from absa_recommender.text_normalizer import normalize_review_text  # noqa: E402
 from absa_recommender.recommender import generate_priority_ranking  # noqa: E402
 from absa_recommender.schemas import ABSAReview, PriorityResponse  # noqa: E402
 from absa_recommender.scoring import (  # noqa: E402
@@ -158,7 +160,6 @@ def main() -> None:
             "Monthly Overview",
             "Top-N Aspects",
             "Aspect Detail",
-            "Peer Benchmark",
             "History",
             "Data Quality",
         ]
@@ -170,10 +171,8 @@ def main() -> None:
     with tabs[2]:
         _show_aspect_detail(response)
     with tabs[3]:
-        _show_peer_benchmark(response)
-    with tabs[4]:
         _show_history(response)
-    with tabs[5]:
+    with tabs[4]:
         _show_data_quality(response, extractions)
 
 
@@ -232,9 +231,7 @@ def _show_explore_controls(db_path: str) -> None:
     crawl_output_path = Path(explore_config.get("output_path", "data/gmaps_streamlit_raw.jsonl"))
     default_month = str(explore_config.get("default_month", datetime.now().strftime("%Y-%m")))
     default_area_name = str(peer_config.get("default_area_name", ""))
-    default_top_n = int(explore_config.get("top_n", 10))
-    top_n_min = int(explore_config.get("top_n_min", 1))
-    top_n_max = int(explore_config.get("top_n_max", 20))
+    explore_top_n = len(load_label_schema("configs/label_schema.yaml").get("aspects", []))
     source_adapter = str(explore_config.get("source_adapter", crawler_config.get("source_adapter", "google-maps")))
     default_live = bool(gmaps_config.get("live", False))
     default_discover_from_area = bool(peer_config.get("discover_from_area", True))
@@ -266,7 +263,6 @@ def _show_explore_controls(db_path: str) -> None:
         value=_restaurant_id_from_url(target_url) if target_url.strip() else "",
         help="Auto-derived from URL; override if you want a stable custom ID.",
     )
-    top_n = st.sidebar.slider("Explore Top N", min_value=top_n_min, max_value=top_n_max, value=default_top_n)
     absa_adapter = st.sidebar.selectbox(
         "ABSA adapter",
         adapter_options,
@@ -329,7 +325,7 @@ def _show_explore_controls(db_path: str) -> None:
         input_path=str(crawl_output_path),
         restaurant_id=restaurant_id,
         review_month=month,
-        top_n=top_n,
+        top_n=explore_top_n,
         db_path=db_path,
         force=bool(explore_config.get("force", False)),
         area_id=_area_id_from_name(effective_area_name or str(peer_config.get("default_area_id", "gmaps_area"))),
@@ -447,7 +443,6 @@ def _show_duckdb_dashboard(db_path: str) -> None:
         "Monthly Overview",
         "Top-N Aspects",
         "Aspect Detail",
-        "Peer Benchmark",
         "History",
         "Data Quality",
         "Job Monitor",
@@ -490,9 +485,7 @@ def _show_duckdb_dashboard(db_path: str) -> None:
     elif selected_tab == "Top-N Aspects":
         _show_persisted_priority(payload)
     elif selected_tab == "Aspect Detail":
-        _show_persisted_aspect_detail(payload)
-    elif selected_tab == "Peer Benchmark":
-        _show_persisted_peer_benchmark(payload)
+        _show_persisted_aspect_detail(payload, db_path)
     elif selected_tab == "History":
         _show_persisted_history(payload)
     elif selected_tab == "Data Quality":
@@ -530,7 +523,6 @@ def _show_persisted_overview(payload: dict[str, Any]) -> None:
     ]
     st.subheader("Sentiment distribution by aspect")
     _show_sentiment_distribution_chart(sentiment_rows)
-    st.dataframe(sentiment_rows, width="stretch", hide_index=True)
 
 
 def _show_persisted_priority(payload: dict[str, Any]) -> None:
@@ -538,6 +530,14 @@ def _show_persisted_priority(payload: dict[str, Any]) -> None:
     if not items:
         st.warning("No persisted priority items found.")
         return
+    peer_negative_rate_by_aspect = {
+        row["aspect"]: row.get("peer_negative_rate")
+        for row in payload.get("peer_benchmark", [])
+    }
+    peer_restaurant_count_by_aspect = {
+        row["aspect"]: row.get("peer_restaurant_count", 0)
+        for row in payload.get("peer_benchmark", [])
+    }
     rows = [
         {
             "Rank": item["rank"],
@@ -548,15 +548,19 @@ def _show_persisted_priority(payload: dict[str, Any]) -> None:
             "Severity": item["severity"],
             "Trend": item["trend_score"],
             "Peer gap": item["benchmark_gap"],
+            "Peer avg": peer_negative_rate_by_aspect.get(item["aspect"], 0.0),
+            "Peer restaurants": peer_restaurant_count_by_aspect.get(item["aspect"], 0),
         }
         for item in items
     ]
     st.dataframe(rows, width="stretch", hide_index=True)
     _show_priority_bar_chart(rows)
     _show_priority_confidence_scatter(rows)
+    _show_trend_peer_gap_quadrant_chart(rows)
+    _show_peer_benchmark_charts(rows)
 
 
-def _show_persisted_aspect_detail(payload: dict[str, Any]) -> None:
+def _show_persisted_aspect_detail(payload: dict[str, Any], db_path: str) -> None:
     items = payload.get("priority", [])
     if not items:
         st.warning("No aspect detail available.")
@@ -571,6 +575,144 @@ def _show_persisted_aspect_detail(payload: dict[str, Any]) -> None:
     component_rows = [{"metric": key, "value": value} for key, value in item["component_scores"].items()]
     _show_metric_value_chart(component_rows)
     st.dataframe(component_rows, width="stretch", hide_index=True)
+    _show_aspect_review_examples(
+        db_path,
+        str(payload.get("restaurant_id", "")),
+        str(payload.get("review_month", "")),
+        str(selected),
+    )
+
+
+def _load_aspect_review_examples(
+    db_path: str,
+    restaurant_id: str,
+    review_month: str,
+    aspect: str,
+    sentiment: str,
+    limit: int = 5,
+) -> list[dict[str, Any]]:
+    try:
+        with duckdb.connect(str(db_path), read_only=True) as connection:
+            rows = connection.execute(
+                """
+                WITH ranked_annotations AS (
+                    SELECT
+                        r.review_id,
+                        r.review_text,
+                        r.rating,
+                        r.review_time,
+                        a.opinion_text,
+                        a.model_confidence,
+                        a.severity,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY r.review_id
+                            ORDER BY
+                                COALESCE(a.severity, 0) DESC,
+                                COALESCE(a.model_confidence, 0) DESC
+                        ) AS row_number
+                    FROM absa_annotations a
+                    JOIN reviews r ON r.review_id = a.review_id
+                    WHERE a.restaurant_id = ?
+                      AND a.review_month = ?
+                      AND a.aspect = ?
+                      AND a.sentiment = ?
+                      AND COALESCE(r.review_text, '') <> ''
+                )
+                SELECT review_text, rating, review_time, opinion_text, model_confidence, severity
+                FROM ranked_annotations
+                WHERE row_number = 1
+                ORDER BY
+                    COALESCE(severity, 0) DESC,
+                    COALESCE(model_confidence, 0) DESC,
+                    review_time DESC NULLS LAST
+                LIMIT ?
+                """,
+                [restaurant_id, review_month, aspect, sentiment, limit],
+            ).fetchall()
+    except Exception as error:
+        st.caption(f"Could not load {sentiment} review examples: {error}")
+        return []
+
+    columns = [
+        "review_text",
+        "rating",
+        "review_time",
+        "opinion_text",
+        "model_confidence",
+        "severity",
+    ]
+    return [dict(zip(columns, row, strict=True)) for row in rows]
+
+
+def _render_review_example_cards(rows: list[dict[str, Any]], empty_message: str) -> None:
+    if not rows:
+        st.caption(empty_message)
+        return
+
+    for index, row in enumerate(rows, start=1):
+        rating = row.get("rating")
+        severity = row.get("severity")
+        confidence = row.get("model_confidence")
+        review_time = row.get("review_time")
+        metadata = [
+            f"rating: {'n/a' if rating is None else rating}",
+            f"severity: {'n/a' if severity is None else f'{float(severity):.2f}'}",
+            f"confidence: {'n/a' if confidence is None else f'{float(confidence):.2f}'}",
+        ]
+        if review_time is not None:
+            metadata.append(f"time: {review_time}")
+
+        st.markdown(f"**#{index}** · " + " · ".join(metadata))
+        opinion_text = str(row.get("opinion_text") or "").strip()
+        if opinion_text:
+            st.caption(f"Opinion: {normalize_review_text(opinion_text)}")
+        st.write(normalize_review_text(str(row.get("review_text") or "").strip()))
+
+
+def _show_aspect_review_examples(
+    db_path: str,
+    restaurant_id: str,
+    review_month: str,
+    aspect: str,
+) -> None:
+    st.subheader("Top review comments for selected aspect")
+    limit = st.slider(
+        "Number of comments per sentiment",
+        min_value=1,
+        max_value=10,
+        value=5,
+        key=f"aspect_review_examples_limit_{aspect}",
+    )
+    negative_rows = _load_aspect_review_examples(
+        db_path,
+        restaurant_id,
+        review_month,
+        aspect,
+        "negative",
+        limit=limit,
+    )
+    positive_rows = _load_aspect_review_examples(
+        db_path,
+        restaurant_id,
+        review_month,
+        aspect,
+        "positive",
+        limit=limit,
+    )
+
+    negative_column, positive_column = st.columns(2)
+    with negative_column:
+        st.markdown("#### Top negative comments")
+        _render_review_example_cards(
+            negative_rows,
+            "No negative comments found for this aspect.",
+        )
+    with positive_column:
+        st.markdown("#### Top positive comments")
+        _render_review_example_cards(
+            positive_rows,
+            "No positive comments found for this aspect.",
+        )
 
 
 def _show_persisted_peer_benchmark(payload: dict[str, Any]) -> None:
@@ -734,7 +876,6 @@ def _show_overview(response: PriorityResponse, extractions) -> None:
     sentiment_rows = _sentiment_rows(month_extractions)
     st.subheader("Sentiment distribution by aspect")
     _show_sentiment_distribution_chart(sentiment_rows)
-    st.dataframe(sentiment_rows, width="stretch", hide_index=True)
 
 
 def _show_priority_items(response: PriorityResponse) -> None:
@@ -752,12 +893,16 @@ def _show_priority_items(response: PriorityResponse) -> None:
             "Severity": item.severity,
             "Trend": item.trend_score,
             "Peer gap": item.benchmark_gap,
+            "Peer avg": item.peer_summary.peer_negative_rate,
+            "Peer restaurants": item.peer_summary.peer_restaurant_count,
         }
         for item in response.items
     ]
     st.dataframe(rows, width="stretch", hide_index=True)
     _show_priority_bar_chart(rows)
     _show_priority_confidence_scatter(rows)
+    _show_trend_peer_gap_quadrant_chart(rows)
+    _show_peer_benchmark_charts(rows)
 
     for item in response.items:
         with st.expander(f"#{item.rank} {item.aspect}", expanded=item.rank == 1):
@@ -800,22 +945,6 @@ def _show_aspect_detail(response: PriorityResponse) -> None:
     ]
     _show_metric_value_chart(metric_rows)
     st.dataframe(metric_rows, width="stretch", hide_index=True)
-
-
-def _show_peer_benchmark(response: PriorityResponse) -> None:
-    rows = [
-        {
-            "Aspect": item.aspect,
-            "Target negative rate": item.negative_rate_smoothed,
-            "Peer avg": item.peer_summary.peer_negative_rate,
-            "Peer restaurants": item.peer_summary.peer_restaurant_count,
-            "Peer gap": item.benchmark_gap,
-            "Flag": item.peer_summary.peer_support_flag or "",
-        }
-        for item in response.items
-    ]
-    _show_peer_benchmark_charts(rows)
-    st.dataframe(rows, width="stretch", hide_index=True)
 
 
 def _show_history(response: PriorityResponse) -> None:
@@ -926,12 +1055,6 @@ def _show_priority_confidence_scatter(rows: list[dict[str, Any]]) -> None:
             ],
         )
         .properties(height=460)
-        .configure_legend(
-            orient="right",
-            direction="vertical",
-            titleLimit=180,
-            labelLimit=180,
-        )
     )
     st.caption("Priority vs Confidence” bubble size represents Severity")
     st.altair_chart(chart, width="stretch")
@@ -952,6 +1075,61 @@ def _show_metric_value_chart(rows: list[dict[str, Any]]) -> None:
         .properties(height=max(220, 34 * len(rows)))
     )
     st.altair_chart(chart, width="stretch")
+
+
+def _show_trend_peer_gap_quadrant_chart(rows: list[dict[str, Any]]) -> None:
+    if not rows:
+        return
+    midpoint = 0.5
+    chart = (
+        alt.Chart(alt.Data(values=rows))
+        .mark_circle(opacity=0.82)
+        .encode(
+            x=alt.X("Peer gap:Q", scale=alt.Scale(domain=[0, 1]), title="Peer gap / benchmark gap"),
+            y=alt.Y("Trend:Q", scale=alt.Scale(domain=[0, 1]), title="Trend score"),
+            size=alt.Size("Priority:Q", title="Priority score", legend=alt.Legend(orient="right")),
+            color=alt.Color(
+                "Severity:Q",
+                scale=alt.Scale(scheme="reds"),
+                title="Severity",
+                legend=alt.Legend(orient="right"),
+            ),
+            tooltip=[
+                "Rank:Q",
+                "Aspect:N",
+                "Priority:Q",
+                "Trend:Q",
+                "Peer gap:Q",
+                "Severity:Q",
+                "Negative rate:Q",
+                "Peer avg:Q",
+                "Peer restaurants:Q",
+            ],
+        )
+        .properties(height=460)
+    )
+    vertical_rule = (
+        alt.Chart(alt.Data(values=[{"x": midpoint}]))
+        .mark_rule(color="gray", strokeDash=[6, 4])
+        .encode(x="x:Q")
+    )
+    horizontal_rule = (
+        alt.Chart(alt.Data(values=[{"y": midpoint}]))
+        .mark_rule(color="gray", strokeDash=[6, 4])
+        .encode(y="y:Q")
+    )
+    st.subheader("Trend vs Peer Gap Quadrant")
+    st.caption(
+        "Upper-right aspects are both worsening over time and performing worse than peers. "
+        "Bubble size represents priority score; color represents severity."
+    )
+    layered_chart = (chart + vertical_rule + horizontal_rule).configure_legend(
+        orient="right",
+        direction="vertical",
+        titleLimit=180,
+        labelLimit=180,
+    )
+    st.altair_chart(layered_chart, width="stretch")
 
 
 def _show_peer_benchmark_charts(rows: list[dict[str, Any]]) -> None:
@@ -1048,7 +1226,11 @@ def _normalize_peer_benchmark_row(row: dict[str, Any]) -> dict[str, Any]:
     return {
         "Aspect": row.get("Aspect", row.get("aspect", "")),
         "Target negative rate": float(
-            row.get("Target negative rate", row.get("target_negative_rate", 0.0)) or 0.0
+            row.get(
+                "Target negative rate",
+                row.get("target_negative_rate", row.get("Negative rate", 0.0)),
+            )
+            or 0.0
         ),
         "Peer avg": float(row.get("Peer avg", row.get("peer_negative_rate", 0.0)) or 0.0),
         "Peer restaurants": int(row.get("Peer restaurants", row.get("peer_restaurant_count", 0)) or 0),

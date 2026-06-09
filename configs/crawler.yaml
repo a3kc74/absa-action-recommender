@@ -22,7 +22,7 @@ google_maps:
   peer_discovery:
     discover_from_area: true
     default_area_id: gmaps_area
-    default_area_name: Phường Bến Nghé, Quận 1, TP Hồ Chí Minh, Việt Nam
+    default_area_name: Hai Bà Trưng, Hà Nội, Việt Nam
     min_peers: 1
     min_restaurants: 2
   adapter:
@@ -32,7 +32,7 @@ google_maps:
     mode: benchmark
     headful: true
     max_discovered_places: 3
-    max_reviews_per_restaurant: 10
+    max_reviews_per_restaurant: 5
     stop_after_old_reviews: 5
     min_peers: 0
     min_restaurants: 0
