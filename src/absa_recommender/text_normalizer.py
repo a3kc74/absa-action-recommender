@@ -7,7 +7,9 @@ from typing import Any
 
 import yaml
 
-_CONTROL_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufffc\ufffd]")
+_CONTROL_CHARS_RE = re.compile(
+    r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\u200b-\u200f\u202a-\u202e\u2060-\u206f\ue000-\uf8ff\ufffc\ufffd]"
+)
 _WHITESPACE_RE = re.compile(r"\s+")
 _REPEATED_SENTENCE_PUNCT_RE = re.compile(r"([.!?]){2,}")
 _DECORATIVE_CHARS_RE = re.compile(r"[~*_=\-]{3,}")

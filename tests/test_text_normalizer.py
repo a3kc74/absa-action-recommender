@@ -20,6 +20,12 @@ def test_normalize_review_text_removes_object_replacement_and_format_chars() -> 
     assert normalize_review_text(text) == "giá mỗi người 300-400 n đồ ăn ổn"
 
 
+def test_normalize_review_text_removes_private_use_google_maps_icon_chars() -> None:
+    text = "Giá mỗi người 300-400 n ₫ đồ ăn: 4 dịch vụ: 5 bầu không khí: 5 0:06 0:18 \ue8dc"
+
+    assert normalize_review_text(text) == "giá mỗi người 300-400 n ₫ đồ ăn: 4 dịch vụ: 5 bầu không khí: 5 0:06 0:18"
+
+
 def test_normalize_review_text_expands_vietnamese_abbreviations() -> None:
     text = "nvien pv ko tốt, chờ 30p"
 
